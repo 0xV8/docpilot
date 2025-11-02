@@ -41,6 +41,7 @@ dependencies = [
     "rich>=13.0.0,<15.0.0",
     "jinja2>=3.1.0,<4.0.0",
     "pydantic>=2.0.0,<3.0.0",
+    "pydantic-settings>=2.0.0,<3.0.0",
     "tomli>=2.0.0; python_version < '3.11'",
     "pathspec>=0.11.0,<1.0.0",
     "tenacity>=8.0.0,<9.0.0",
@@ -81,11 +82,11 @@ all = [
 docpilot = "docpilot.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/docpilot"
-Documentation = "https://docpilot.readthedocs.io"
-Repository = "https://github.com/yourusername/docpilot"
-Issues = "https://github.com/yourusername/docpilot/issues"
-Changelog = "https://github.com/yourusername/docpilot/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/0xV8/docpilot"
+Documentation = "https://github.com/0xV8/docpilot#readme"
+Repository = "https://github.com/0xV8/docpilot"
+Issues = "https://github.com/0xV8/docpilot/issues"
+Changelog = "https://github.com/0xV8/docpilot/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/docpilot"]
@@ -169,6 +170,15 @@ disallow_untyped_defs = false
 [[tool.mypy.overrides]]
 module = "ollama.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "docpilot.cli.commands"
+warn_return_any = false
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = "docpilot.formatters.sphinx"
+warn_return_any = false
 
 # Pytest configuration
 [tool.pytest.ini_options]

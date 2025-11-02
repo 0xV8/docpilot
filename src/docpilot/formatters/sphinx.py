@@ -6,8 +6,6 @@ https://sphinx-rtd-tutorial.readthedocs.io/en/latest/docstrings.html
 
 from __future__ import annotations
 
-from typing import Optional
-
 from docpilot.core.models import CodeElement, ParameterInfo
 from docpilot.formatters.base import BaseFormatter
 
@@ -189,17 +187,13 @@ class SphinxFormatter(BaseFormatter):
             lines.append(param_line)
 
             # :type name: type (if separate type lines enabled and type available)
-            if (
-                self.separate_type_lines
-                and self.include_types
-                and param.type_hint
-            ):
+            if self.separate_type_lines and self.include_types and param.type_hint:
                 type_line = f":type {param.name}: {param.type_hint}"
                 lines.append(type_line)
 
         return "\n".join(lines)
 
-    def format_returns(self, return_type: Optional[str], description: str) -> str:
+    def format_returns(self, return_type: str | None, description: str) -> str:
         """Format the return field.
 
         Args:
@@ -326,7 +320,7 @@ class SphinxFormatter(BaseFormatter):
         exceptions: dict[str, str] = {}
         lines = raises_text.splitlines()
 
-        current_exc: Optional[str] = None
+        current_exc: str | None = None
         current_desc: list[str] = []
 
         for line in lines:
@@ -403,7 +397,7 @@ class SphinxNapoleonFormatter(SphinxFormatter):
         else:
             from docpilot.formatters.numpy import NumpyFormatter
 
-            formatter = NumpyFormatter(
+            formatter = NumpyFormatter(  # type: ignore[assignment]
                 indent=self.indent,
                 max_line_length=self.max_line_length,
                 include_types=self.include_types,

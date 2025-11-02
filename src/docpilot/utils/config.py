@@ -9,9 +9,9 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if sys.version_info >= (3, 11):
@@ -135,11 +135,11 @@ class DocpilotConfig(BaseSettings):
         default="gpt-3.5-turbo",
         description="LLM model name",
     )
-    llm_api_key: Optional[str] = Field(
+    llm_api_key: str | None = Field(
         default=None,
         description="LLM API key",
     )
-    llm_base_url: Optional[str] = Field(
+    llm_base_url: str | None = Field(
         default=None,
         description="LLM base URL",
     )
@@ -161,11 +161,11 @@ class DocpilotConfig(BaseSettings):
     )
 
     # Project context
-    project_name: Optional[str] = Field(
+    project_name: str | None = Field(
         default=None,
         description="Project name",
     )
-    project_description: Optional[str] = Field(
+    project_description: str | None = Field(
         default=None,
         description="Project description",
     )
@@ -195,9 +195,7 @@ class DocpilotConfig(BaseSettings):
         valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         v_upper = v.upper()
         if v_upper not in valid_levels:
-            raise ValueError(
-                f"Invalid log level: {v}. Must be one of {valid_levels}"
-            )
+            raise ValueError(f"Invalid log level: {v}. Must be one of {valid_levels}")
         return v_upper
 
     @field_validator("log_format")
@@ -207,9 +205,7 @@ class DocpilotConfig(BaseSettings):
         valid_formats = ["json", "console"]
         v_lower = v.lower()
         if v_lower not in valid_formats:
-            raise ValueError(
-                f"Invalid log format: {v}. Must be one of {valid_formats}"
-            )
+            raise ValueError(f"Invalid log format: {v}. Must be one of {valid_formats}")
         return v_lower
 
     def to_llm_config(self) -> Any:
@@ -232,7 +228,7 @@ class DocpilotConfig(BaseSettings):
 
 
 def load_config(
-    config_path: Optional[Path] = None,
+    config_path: Path | None = None,
     **overrides: Any,
 ) -> DocpilotConfig:
     """Load configuration from file and environment.
@@ -267,7 +263,7 @@ def load_config(
     return DocpilotConfig(**merged_config)
 
 
-def find_config_file() -> Optional[Path]:
+def find_config_file() -> Path | None:
     """Search for a config file in standard locations.
 
     Searches in this order:
@@ -325,7 +321,7 @@ def load_config_file(config_path: Path) -> dict[str, Any]:
 
         # Extract docpilot section
         if config_path.name == "pyproject.toml":
-            config = data.get("tool", {}).get("docpilot", {})
+            config: dict[str, Any] = data.get("tool", {}).get("docpilot", {})
         else:
             config = data.get("docpilot", data)
 
@@ -401,7 +397,7 @@ log_format = "console"
     output_path.write_text(default_config)
 
 
-def get_api_key(provider: LLMProvider) -> Optional[str]:
+def get_api_key(provider: LLMProvider) -> str | None:
     """Get API key from environment variables.
 
     Args:

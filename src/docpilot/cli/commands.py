@@ -7,10 +7,10 @@ providing commands for generating, analyzing, and managing docstrings.
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 import time
 from pathlib import Path
-from typing import Optional
 
 import click
 import structlog
@@ -22,13 +22,11 @@ from docpilot.core.generator import DocstringGenerator
 from docpilot.core.models import DocstringStyle
 from docpilot.llm.base import LLMProvider, create_provider
 from docpilot.utils.config import (
-    DocpilotConfig,
-    load_config,
     create_default_config,
     get_api_key,
+    load_config,
 )
 from docpilot.utils.file_ops import FileOperations
-
 
 logger = structlog.get_logger(__name__)
 
@@ -37,7 +35,7 @@ logger = structlog.get_logger(__name__)
 @click.version_option(version=__version__)
 @click.option(
     "--config",
-    type=click.Path(exists=True, path_type=Path),
+    type=click.Path(exists=True, path_type=Path),  # type: ignore[type-var]
     help="Path to configuration file",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
@@ -45,7 +43,7 @@ logger = structlog.get_logger(__name__)
 @click.pass_context
 def cli(
     ctx: click.Context,
-    config: Optional[Path],
+    config: Path | None,
     verbose: bool,
     quiet: bool,
 ) -> None:
@@ -55,7 +53,7 @@ def cli(
     using state-of-the-art LLMs.
     """
     # Setup logging
-    log_level = "DEBUG" if verbose else "INFO"
+    log_level = logging.DEBUG if verbose else logging.INFO
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
     )
@@ -72,7 +70,7 @@ def cli(
 
 
 @cli.command()
-@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.argument("path", type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.option(
     "--style",
     type=click.Choice(["google", "numpy", "sphinx", "auto"], case_sensitive=False),
@@ -97,9 +95,9 @@ def generate(
     style: str,
     overwrite: bool,
     include_private: bool,
-    provider: Optional[str],
-    model: Optional[str],
-    api_key: Optional[str],
+    provider: str | None,
+    model: str | None,
+    api_key: str | None,
     dry_run: bool,
     diff: bool,
 ) -> None:
@@ -109,7 +107,7 @@ def generate(
     will be processed recursively.
     """
     ui: DocpilotUI = ctx.obj["ui"]
-    config_path: Optional[Path] = ctx.obj["config_path"]
+    config_path: Path | None = ctx.obj["config_path"]
 
     ui.print_banner()
 
@@ -180,7 +178,7 @@ def generate(
 
     with ui.create_progress() as progress:
         task = progress.add_task(
-            f"[cyan]Generating docstrings...",
+            "[cyan]Generating docstrings...",
             total=len(files),
         )
 
@@ -190,6 +188,9 @@ def generate(
                     task,
                     description=f"[cyan]Processing {file_path.name}...",
                 )
+
+                # Parse file first to get element info
+                parse_result = generator.parser.parse_file(file_path)
 
                 # Generate docstrings
                 generated = asyncio.run(
@@ -203,10 +204,45 @@ def generate(
 
                 total_generated += len(generated)
 
-                # Show results
+                # Write docstrings to file
                 for doc in generated:
-                    if ctx.obj["verbose"]:
-                        ui.display_generation_result(doc, show_content=diff)
+                    try:
+                        # Find element to get parent_class
+                        element = next(
+                            (
+                                e
+                                for e in parse_result.elements
+                                if e.name == doc.element_name
+                            ),
+                            None,
+                        )
+                        if element:
+                            parent_class = element.parent_class
+                            # Write to file
+                            file_ops.insert_docstring(
+                                file_path=file_path,
+                                element_name=doc.element_name,
+                                docstring=doc.docstring,
+                                parent_class=parent_class,
+                            )
+                        else:
+                            ui.print_warning(
+                                f"Element {doc.element_name} not found in parse result"
+                            )
+                            total_errors += 1
+
+                        if ctx.obj["verbose"]:
+                            ui.display_generation_result(doc, show_content=diff)
+
+                    except Exception as e:
+                        ui.print_error(f"Failed to write {doc.element_name}: {e}")
+                        logger.error(
+                            "docstring_write_error",
+                            file=str(file_path),
+                            element=doc.element_name,
+                            error=str(e),
+                        )
+                        total_errors += 1
 
                 progress.advance(task)
 
@@ -235,7 +271,7 @@ def generate(
 
 
 @cli.command()
-@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.argument("path", type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.option("--include-private", is_flag=True, help="Include private elements")
 @click.option("--show-complexity", is_flag=True, help="Show complexity scores")
 @click.option("--show-patterns", is_flag=True, help="Show detected patterns")
@@ -288,7 +324,7 @@ def analyze(
 
 
 @cli.command()
-@click.argument("output", type=click.Path(path_type=Path), default="docpilot.toml")
+@click.argument("output", type=click.Path(path_type=Path), default="docpilot.toml")  # type: ignore[type-var]
 def init(output: Path) -> None:
     """Initialize a new docpilot configuration file.
 
@@ -323,8 +359,8 @@ def init(output: Path) -> None:
 def test_connection(
     ctx: click.Context,
     provider: str,
-    model: Optional[str],
-    api_key: Optional[str],
+    model: str | None,
+    api_key: str | None,
 ) -> None:
     """Test connection to an LLM provider.
 
@@ -362,9 +398,7 @@ def test_connection(
         result = asyncio.run(llm.test_connection())
 
         if result:
-            ui.print_success(
-                f"Successfully connected to {provider} with model {model}"
-            )
+            ui.print_success(f"Successfully connected to {provider} with model {model}")
         else:
             ui.print_error("Connection test failed")
             sys.exit(1)
@@ -381,7 +415,9 @@ def version(ctx: click.Context) -> None:
     """Show version information."""
     ui: DocpilotUI = ctx.obj["ui"]
 
-    ui.console.print(f"[bold cyan]docpilot[/bold cyan] version [green]{__version__}[/green]")
+    ui.console.print(
+        f"[bold cyan]docpilot[/bold cyan] version [green]{__version__}[/green]"
+    )
     ui.console.print("\nA production-grade AI-powered docstring generator for Python")
     ui.console.print("\nSupported styles: Google, NumPy, Sphinx")
     ui.console.print("Supported providers: OpenAI, Anthropic, Local (Ollama)")

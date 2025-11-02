@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import textwrap
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from docpilot.core.models import CodeElement, ParameterInfo
 
@@ -83,7 +82,7 @@ class BaseFormatter(ABC):
         pass
 
     @abstractmethod
-    def format_returns(self, return_type: Optional[str], description: str) -> str:
+    def format_returns(self, return_type: str | None, description: str) -> str:
         """Format the returns section.
 
         Args:
@@ -110,7 +109,7 @@ class BaseFormatter(ABC):
     def wrap_text(
         self,
         text: str,
-        width: Optional[int] = None,
+        width: int | None = None,
         initial_indent: str = "",
         subsequent_indent: str = "",
     ) -> str:
@@ -168,7 +167,9 @@ class BaseFormatter(ABC):
 
         indent_str = self.indent * levels
         lines = text.splitlines()
-        return "\n".join(f"{indent_str}{line}" if line.strip() else "" for line in lines)
+        return "\n".join(
+            f"{indent_str}{line}" if line.strip() else "" for line in lines
+        )
 
     def clean_content(self, content: str) -> str:
         """Clean and normalize docstring content.
@@ -190,9 +191,7 @@ class BaseFormatter(ABC):
 
         return "\n".join(lines)
 
-    def parse_structured_content(
-        self, content: str
-    ) -> dict[str, str | dict[str, str]]:
+    def parse_structured_content(self, content: str) -> dict[str, str | dict[str, str]]:
         """Parse structured docstring content into sections.
 
         Attempts to extract sections like Args, Returns, Raises from
@@ -245,9 +244,7 @@ class BaseFormatter(ABC):
 
         return sections
 
-    def extract_parameter_descriptions(
-        self, args_section: str
-    ) -> dict[str, str]:
+    def extract_parameter_descriptions(self, args_section: str) -> dict[str, str]:
         """Extract parameter descriptions from args section text.
 
         Args:
@@ -262,7 +259,7 @@ class BaseFormatter(ABC):
             return descriptions
 
         lines = args_section.splitlines()
-        current_param: Optional[str] = None
+        current_param: str | None = None
         current_desc: list[str] = []
 
         for line in lines:

@@ -1,8 +1,6 @@
 """Shared pytest fixtures for docpilot tests."""
 
-import os
 from pathlib import Path
-from typing import Generator
 
 import pytest
 
@@ -18,7 +16,8 @@ def sample_python_file(tmp_path_factory) -> Path:
     """Create a sample Python file for testing."""
     tmp_dir = tmp_path_factory.mktemp("samples")
     sample_file = tmp_dir / "sample.py"
-    sample_file.write_text("""
+    sample_file.write_text(
+        """
 def example_function(x: int, y: int) -> int:
     '''Add two numbers.'''
     return x + y
@@ -29,7 +28,8 @@ class ExampleClass:
     def method(self) -> None:
         '''Example method.'''
         pass
-    """)
+    """
+    )
     return sample_file
 
 
@@ -38,7 +38,7 @@ def mock_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock environment variables for all tests."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key-12345")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-67890")
-    monkeypatch.setenv("DOCPILOT_LLM_PROVIDER", "none")
+    monkeypatch.setenv("DOCPILOT_LLM_PROVIDER", "mock")
 
 
 @pytest.fixture

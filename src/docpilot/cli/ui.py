@@ -7,29 +7,28 @@ for progress bars, tables, panels, and formatted output.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskProgressColumn,
-    TimeRemainingColumn,
+    TextColumn,
     TimeElapsedColumn,
+    TimeRemainingColumn,
 )
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.tree import Tree
-from rich import box
 
 from docpilot.core.models import (
     CodeElementType,
     GeneratedDocstring,
     ParseResult,
-    DocstringStyle,
 )
 
 
@@ -47,7 +46,7 @@ class DocpilotUI:
 
     def __init__(
         self,
-        console: Optional[Console] = None,
+        console: Console | None = None,
         verbose: bool = False,
         quiet: bool = False,
     ) -> None:
@@ -241,7 +240,9 @@ class DocpilotUI:
         if self.quiet:
             return
 
-        table = Table(title="[bold cyan]Generation Statistics[/bold cyan]", box=box.ROUNDED)
+        table = Table(
+            title="[bold cyan]Generation Statistics[/bold cyan]", box=box.ROUNDED
+        )
         table.add_column("Metric", style="cyan", no_wrap=True)
         table.add_column("Value", style="magenta", justify="right")
 
@@ -285,8 +286,12 @@ class DocpilotUI:
             # Find methods of this class
             class_methods = [m for m in methods if m.parent_class == cls.name]
             for method in class_methods:
-                method_icon = "🔒" if not method.is_public else ("⚙️" if method.is_property else "🔧")
-                method_node = class_node.add(f"{method_icon} {method.name}")
+                method_icon = (
+                    "🔒"
+                    if not method.is_public
+                    else ("⚙️" if method.is_property else "🔧")
+                )
+                class_node.add(f"{method_icon} {method.name}")
 
         # Add standalone functions
         if functions:
@@ -392,19 +397,20 @@ class DocpilotUI:
         Returns:
             Formatted size string
         """
+        size: float = float(size_bytes)
         for unit in ["B", "KB", "MB", "GB"]:
-            if size_bytes < 1024:
-                return f"{size_bytes:.1f} {unit}"
-            size_bytes /= 1024
-        return f"{size_bytes:.1f} TB"
+            if size < 1024:
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} TB"
 
 
 # Global UI instance
-_ui: Optional[DocpilotUI] = None
+_ui: DocpilotUI | None = None
 
 
 def get_ui(
-    console: Optional[Console] = None,
+    console: Console | None = None,
     verbose: bool = False,
     quiet: bool = False,
 ) -> DocpilotUI:

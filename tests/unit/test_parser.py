@@ -1,10 +1,9 @@
 """Unit tests for the code parser."""
 
 import pytest
-from pathlib import Path
 
-from docpilot.core.parser import PythonParser
 from docpilot.core.models import CodeElementType
+from docpilot.core.parser import PythonParser
 
 
 class TestPythonParser:
@@ -85,7 +84,7 @@ def get_value(self) -> int:
         parser = PythonParser()
         result = parser.parse_file(sample_python_file)
 
-        assert result.file_path == sample_python_file
+        assert str(result.file_path) == str(sample_python_file)
         assert len(result.elements) > 0
 
     def test_parse_invalid_syntax(self):

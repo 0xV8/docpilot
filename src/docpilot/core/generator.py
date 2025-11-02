@@ -7,17 +7,16 @@ integrating parsing, analysis, LLM generation, and formatting.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Protocol
 
 import structlog
 
 from docpilot.core.analyzer import CodeAnalyzer
 from docpilot.core.models import (
     CodeElement,
-    DocumentationContext,
     DocstringStyle,
+    DocumentationContext,
     GeneratedDocstring,
-    ParseResult,
 )
 from docpilot.core.parser import PythonParser
 
@@ -60,6 +59,14 @@ class LLMProvider(Protocol):
         """
         ...
 
+    async def test_connection(self) -> bool:
+        """Test connection to the LLM provider.
+
+        Returns:
+            True if connection is successful, False otherwise
+        """
+        ...
+
 
 class DocstringGenerator:
     """Orchestrates the docstring generation process.
@@ -77,8 +84,8 @@ class DocstringGenerator:
 
     def __init__(
         self,
-        llm_provider: Optional[LLMProvider] = None,
-        formatter: Optional[DocstringFormatter] = None,
+        llm_provider: LLMProvider | None = None,
+        formatter: DocstringFormatter | None = None,
         default_style: DocstringStyle = DocstringStyle.GOOGLE,
         analyze_code: bool = True,
     ) -> None:
@@ -100,7 +107,7 @@ class DocstringGenerator:
     async def generate_for_file(
         self,
         file_path: str | Path,
-        style: Optional[DocstringStyle] = None,
+        style: DocstringStyle | None = None,
         include_private: bool = False,
         overwrite_existing: bool = False,
     ) -> list[GeneratedDocstring]:
@@ -168,9 +175,9 @@ class DocstringGenerator:
     async def generate_for_element(
         self,
         element: CodeElement,
-        style: Optional[DocstringStyle] = None,
-        context_elements: Optional[list[CodeElement]] = None,
-        custom_instructions: Optional[str] = None,
+        style: DocstringStyle | None = None,
+        context_elements: list[CodeElement] | None = None,
+        custom_instructions: str | None = None,
     ) -> GeneratedDocstring:
         """Generate a docstring for a single code element.
 
@@ -241,7 +248,7 @@ class DocstringGenerator:
     async def generate_for_project(
         self,
         project_path: str | Path,
-        style: Optional[DocstringStyle] = None,
+        style: DocstringStyle | None = None,
         include_private: bool = False,
         overwrite_existing: bool = False,
         file_pattern: str = "**/*.py",
@@ -274,7 +281,9 @@ class DocstringGenerator:
 
         for py_file in python_files:
             # Skip common directories
-            if any(part.startswith(".") or part == "__pycache__" for part in py_file.parts):
+            if any(
+                part.startswith(".") or part == "__pycache__" for part in py_file.parts
+            ):
                 continue
 
             try:
@@ -334,11 +343,11 @@ class DocstringGenerator:
 
         # Increase confidence if all parameters are documented
         if element.parameters:
-            param_names = {p.name for p in element.parameters if p.name not in ("self", "cls")}
+            param_names = {
+                p.name for p in element.parameters if p.name not in ("self", "cls")
+            }
             documented_params = {
-                name
-                for name in param_names
-                if name in docstring_content.lower()
+                name for name in param_names if name in docstring_content.lower()
             }
             if param_names and documented_params == param_names:
                 confidence += 0.1
@@ -360,12 +369,15 @@ class DocstringGenerator:
         warnings: list[str] = []
 
         # Warn if complex function has short docstring
-        if element.complexity_score and element.complexity_score > 10:
-            if len(docstring_content.split()) < 20:
-                warnings.append(
-                    f"Complex function (complexity {element.complexity_score}) "
-                    "has brief documentation"
-                )
+        if (
+            element.complexity_score
+            and element.complexity_score > 10
+            and len(docstring_content.split()) < 20
+        ):
+            warnings.append(
+                f"Complex function (complexity {element.complexity_score}) "
+                "has brief documentation"
+            )
 
         # Warn if parameters are missing type hints
         untyped_params = [
@@ -459,3 +471,11 @@ class MockLLMProvider:
                 lines.append(f"    {exc.exception_type}: Description needed")
 
         return "\n".join(lines)
+
+    async def test_connection(self) -> bool:
+        """Test connection to the mock provider.
+
+        Returns:
+            Always returns True for mock provider
+        """
+        return True

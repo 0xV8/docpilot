@@ -10,7 +10,6 @@ import ast
 import difflib
 import shutil
 from pathlib import Path
-from typing import Iterator, Optional
 
 import pathspec
 import structlog
@@ -45,7 +44,7 @@ class FileOperations:
         self,
         root_path: Path,
         pattern: str = "**/*.py",
-        exclude_patterns: Optional[list[str]] = None,
+        exclude_patterns: list[str] | None = None,
     ) -> list[Path]:
         """Find Python files matching pattern, excluding specified patterns.
 
@@ -109,7 +108,9 @@ class FileOperations:
             return backup_path
 
         shutil.copy2(file_path, backup_path)
-        self._log.info("file_backed_up", original=str(file_path), backup=str(backup_path))
+        self._log.info(
+            "file_backed_up", original=str(file_path), backup=str(backup_path)
+        )
 
         return backup_path
 
@@ -154,7 +155,7 @@ class FileOperations:
         file_path: Path,
         element_name: str,
         docstring: str,
-        parent_class: Optional[str] = None,
+        parent_class: str | None = None,
     ) -> bool:
         """Insert or replace a docstring in a Python file.
 
@@ -210,7 +211,9 @@ class FileOperations:
         # Write modified content
         if not self.dry_run:
             file_path.write_text(modified_content, encoding="utf-8")
-            self._log.info("docstring_inserted", file=str(file_path), element=element_name)
+            self._log.info(
+                "docstring_inserted", file=str(file_path), element=element_name
+            )
         else:
             self._log.info(
                 "dry_run_insert",
@@ -224,8 +227,8 @@ class FileOperations:
         self,
         tree: ast.AST,
         element_name: str,
-        parent_class: Optional[str] = None,
-    ) -> Optional[ast.AST]:
+        parent_class: str | None = None,
+    ) -> ast.AST | None:
         """Find a node in the AST by name.
 
         Args:
@@ -241,19 +244,22 @@ class FileOperations:
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef) and node.name == parent_class:
                     for item in node.body:
-                        if isinstance(
-                            item, (ast.FunctionDef, ast.AsyncFunctionDef)
-                        ) and item.name == element_name:
+                        if (
+                            isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                            and item.name == element_name
+                        ):
                             return item
         else:
             # Find top-level function or class
             for node in ast.walk(tree):
-                if isinstance(
-                    node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-                ) and node.name == element_name:
-                    # Make sure it's top-level
-                    if not parent_class:
-                        return node
+                if (
+                    isinstance(
+                        node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                    )
+                    and node.name == element_name
+                    and not parent_class
+                ):
+                    return node
 
         return None
 
@@ -294,8 +300,8 @@ class FileOperations:
             docstring, indent_str
         )
 
-        # Find insertion point
-        insert_line = node.lineno  # Line after def/class
+        # Find insertion point - lineno attribute exists on all statement nodes
+        insert_line = getattr(node, "lineno", 1)  # Line after def/class
 
         # Check if existing docstring
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -320,9 +326,7 @@ class FileOperations:
 
                         # Replace lines
                         new_lines = (
-                            lines[:i]
-                            + [formatted_docstring]
-                            + lines[end_line + 1 :]
+                            lines[:i] + [formatted_docstring] + lines[end_line + 1 :]
                         )
                         return "".join(new_lines)
 
@@ -331,9 +335,7 @@ class FileOperations:
 
         return "".join(new_lines)
 
-    def _format_docstring_for_insertion(
-        self, docstring: str, indent: str
-    ) -> str:
+    def _format_docstring_for_insertion(self, docstring: str, indent: str) -> str:
         """Format docstring for insertion into source code.
 
         Args:
@@ -393,7 +395,7 @@ class FileOperations:
 def find_python_files(
     root_path: Path | str,
     pattern: str = "**/*.py",
-    exclude_patterns: Optional[list[str]] = None,
+    exclude_patterns: list[str] | None = None,
 ) -> list[Path]:
     """Convenience function to find Python files.
 

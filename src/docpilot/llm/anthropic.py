@@ -10,20 +10,20 @@ from typing import Any
 
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
 
 from docpilot.core.models import DocumentationContext
 from docpilot.llm.base import (
-    BaseLLMProvider,
-    LLMConfig,
-    LLMResponse,
-    LLMError,
-    RateLimitError,
     APIError,
     AuthenticationError,
+    BaseLLMProvider,
+    LLMConfig,
+    LLMError,
+    LLMResponse,
+    RateLimitError,
     TokenLimitError,
 )
 
@@ -51,7 +51,7 @@ class AnthropicProvider(BaseLLMProvider):
         super().__init__(config)
 
         try:
-            from anthropic import AsyncAnthropic
+            from anthropic import AsyncAnthropic  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
                 "Anthropic package not installed. "
@@ -170,8 +170,12 @@ class AnthropicProvider(BaseLLMProvider):
                 finish_reason=response.stop_reason,
                 metadata={
                     "id": response.id,
-                    "input_tokens": response.usage.input_tokens if response.usage else None,
-                    "output_tokens": response.usage.output_tokens if response.usage else None,
+                    "input_tokens": (
+                        response.usage.input_tokens if response.usage else None
+                    ),
+                    "output_tokens": (
+                        response.usage.output_tokens if response.usage else None
+                    ),
                 },
             )
 
@@ -201,9 +205,15 @@ class AnthropicProvider(BaseLLMProvider):
         try:
             from anthropic import (
                 APIError as AnthropicAPIError,
-                RateLimitError as AnthropicRateLimitError,
+            )
+            from anthropic import (
                 AuthenticationError as AnthropicAuthError,
+            )
+            from anthropic import (
                 BadRequestError,
+            )
+            from anthropic import (
+                RateLimitError as AnthropicRateLimitError,
             )
         except ImportError:
             raise LLMError(
@@ -278,7 +288,7 @@ class AnthropicProvider(BaseLLMProvider):
 
     async def estimate_cost(
         self, prompt: str, completion_tokens: int = 500
-    ) -> dict[str, float]:
+    ) -> dict[str, float | str]:
         """Estimate the cost of a completion.
 
         Args:

@@ -9,13 +9,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
-from docpilot.core.models import DocumentationContext, CodeElement, CodeElementType
-
+from docpilot.core.models import CodeElement, DocumentationContext
 
 logger = structlog.get_logger(__name__)
 
@@ -50,14 +49,14 @@ class LLMConfig(BaseModel):
 
     provider: LLMProvider
     model: str
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
+    api_key: str | None = None
+    base_url: str | None = None
     temperature: float = Field(default=0.7, ge=0.0, le=1.0)
     max_tokens: int = Field(default=2000, gt=0)
     timeout: int = Field(default=30, gt=0)
     max_retries: int = Field(default=3, ge=0)
     retry_delay: float = Field(default=1.0, ge=0.0)
-    rate_limit_rpm: Optional[int] = Field(default=None, gt=0)
+    rate_limit_rpm: int | None = Field(default=None, gt=0)
     additional_params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -74,8 +73,8 @@ class LLMResponse(BaseModel):
 
     content: str
     model: str
-    tokens_used: Optional[int] = None
-    finish_reason: Optional[str] = None
+    tokens_used: int | None = None
+    finish_reason: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -133,6 +132,18 @@ class BaseLLMProvider(ABC):
         """
         pass
 
+    @abstractmethod
+    async def test_connection(self) -> bool:
+        """Test connection to the LLM provider.
+
+        Returns:
+            True if connection is successful, False otherwise
+
+        Raises:
+            LLMError: If connection test fails with an error
+        """
+        pass
+
     def build_docstring_prompt(self, context: DocumentationContext) -> str:
         """Build a prompt for docstring generation.
 
@@ -146,7 +157,9 @@ class BaseLLMProvider(ABC):
         lines: list[str] = []
 
         # System context
-        lines.append("You are an expert Python developer writing comprehensive docstrings.")
+        lines.append(
+            "You are an expert Python developer writing comprehensive docstrings."
+        )
         lines.append(
             f"Generate a {context.style.value}-style docstring for the following code element."
         )
@@ -203,7 +216,11 @@ class BaseLLMProvider(ABC):
         lines.append("- Be concise but comprehensive")
         lines.append("- Include all parameters, returns, and raised exceptions")
 
-        if context.include_examples and element.complexity_score and element.complexity_score > 5:
+        if (
+            context.include_examples
+            and element.complexity_score
+            and element.complexity_score > 5
+        ):
             lines.append("- Include a usage example")
 
         if context.include_type_hints and element.parameters:
@@ -270,8 +287,8 @@ class LLMError(Exception):
     def __init__(
         self,
         message: str,
-        provider: Optional[str] = None,
-        original_error: Optional[Exception] = None,
+        provider: str | None = None,
+        original_error: Exception | None = None,
     ) -> None:
         """Initialize LLM error.
 

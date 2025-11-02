@@ -8,9 +8,9 @@ All models use Pydantic v2 for validation and serialization.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 
 class CodeElementType(str, Enum):
@@ -50,12 +50,12 @@ class ParameterInfo(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    type_hint: Optional[str] = None
-    default_value: Optional[str] = None
+    type_hint: str | None = None
+    default_value: str | None = None
     is_required: bool = True
     is_variadic: bool = False
     is_keyword: bool = False
-    description: Optional[str] = None
+    description: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -78,8 +78,8 @@ class ReturnInfo(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    type_hint: Optional[str] = None
-    description: Optional[str] = None
+    type_hint: str | None = None
+    description: str | None = None
     is_generator: bool = False
     is_async: bool = False
 
@@ -95,7 +95,7 @@ class ExceptionInfo(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     exception_type: str
-    description: Optional[str] = None
+    description: str | None = None
 
     @field_validator("exception_type")
     @classmethod
@@ -166,11 +166,11 @@ class CodeElement(BaseModel):
     name: str
     element_type: CodeElementType
     lineno: int
-    end_lineno: Optional[int] = None
+    end_lineno: int | None = None
     source_code: str
-    docstring: Optional[str] = None
+    docstring: str | None = None
     file_path: str
-    parent_class: Optional[str] = None
+    parent_class: str | None = None
     module_path: str
 
     # Visibility and modifiers
@@ -183,16 +183,17 @@ class CodeElement(BaseModel):
 
     # Function/Method specific
     parameters: list[ParameterInfo] = Field(default_factory=list)
-    return_info: Optional[ReturnInfo] = None
+    return_info: ReturnInfo | None = None
     raises: list[ExceptionInfo] = Field(default_factory=list)
     decorators: list[DecoratorInfo] = Field(default_factory=list)
 
     # Class specific
     base_classes: list[str] = Field(default_factory=list)
-    attributes: list[tuple[str, Optional[str]]] = Field(default_factory=list)
+    attributes: list[tuple[str, str | None]] = Field(default_factory=list)
+    _methods: list[CodeElement] = PrivateAttr(default_factory=list)
 
     # Analysis metadata
-    complexity_score: Optional[int] = None
+    complexity_score: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("name")
@@ -223,16 +224,39 @@ class CodeElement(BaseModel):
     @property
     def has_parameters(self) -> bool:
         """Check if element has parameters (excluding self/cls)."""
-        return bool(
-            [p for p in self.parameters if p.name not in ("self", "cls")]
-        )
+        return bool([p for p in self.parameters if p.name not in ("self", "cls")])
 
     @property
     def has_docstring(self) -> bool:
         """Check if element has an existing docstring."""
         return bool(self.docstring and self.docstring.strip())
 
-    def get_decorator(self, name: str) -> Optional[DecoratorInfo]:
+    @property
+    def return_type(self) -> str | None:
+        """Get return type hint as string.
+
+        This property provides backwards compatibility with test expectations.
+
+        Returns:
+            Return type hint string if available, None otherwise
+        """
+        if self.return_info and self.return_info.type_hint:
+            return self.return_info.type_hint
+        return None
+
+    @property
+    def methods(self) -> list[CodeElement]:
+        """Get list of methods for this class element.
+
+        This property is only meaningful for CLASS elements and provides
+        backwards compatibility with test expectations.
+
+        Returns:
+            List of method elements belonging to this class
+        """
+        return self._methods
+
+    def get_decorator(self, name: str) -> DecoratorInfo | None:
         """Get decorator by name if it exists.
 
         Args:
@@ -268,14 +292,14 @@ class DocumentationContext(BaseModel):
 
     element: CodeElement
     style: DocstringStyle = DocstringStyle.GOOGLE
-    project_name: Optional[str] = None
-    project_description: Optional[str] = None
+    project_name: str | None = None
+    project_description: str | None = None
     include_examples: bool = True
     include_type_hints: bool = True
     infer_types: bool = True
     max_line_length: int = 88
     context_elements: list[CodeElement] = Field(default_factory=list)
-    custom_instructions: Optional[str] = None
+    custom_instructions: str | None = None
 
 
 class GeneratedDocstring(BaseModel):
@@ -339,9 +363,7 @@ class ParseResult(BaseModel):
         """Get only public code elements."""
         return [elem for elem in self.elements if elem.is_public]
 
-    def get_elements_by_type(
-        self, element_type: CodeElementType
-    ) -> list[CodeElement]:
+    def get_elements_by_type(self, element_type: CodeElementType) -> list[CodeElement]:
         """Get all elements of a specific type.
 
         Args:

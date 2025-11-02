@@ -7,22 +7,21 @@ allowing docstring generation without external API calls.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
 
 from docpilot.core.models import DocumentationContext
 from docpilot.llm.base import (
+    APIError,
     BaseLLMProvider,
     LLMConfig,
     LLMResponse,
-    LLMError,
-    APIError,
 )
 
 
@@ -49,6 +48,7 @@ class LocalProvider(BaseLLMProvider):
 
         try:
             import ollama
+
             self.ollama = ollama
             self.client = ollama.AsyncClient(
                 host=config.base_url or "http://localhost:11434"
@@ -233,7 +233,7 @@ class LocalProvider(BaseLLMProvider):
                 "Cannot connect to Ollama. Is it running?",
                 provider="local",
                 original_error=e,
-            )
+            ) from e
 
     async def list_models(self) -> list[dict[str, Any]]:
         """List available models in Ollama.
@@ -263,9 +263,9 @@ class LocalProvider(BaseLLMProvider):
                 f"Failed to list models: {e}",
                 provider="local",
                 original_error=e,
-            )
+            ) from e
 
-    async def pull_model(self, model_name: Optional[str] = None) -> None:
+    async def pull_model(self, model_name: str | None = None) -> None:
         """Pull a model from Ollama registry.
 
         Args:
@@ -282,9 +282,7 @@ class LocalProvider(BaseLLMProvider):
             # Ollama pull is synchronous, run in thread pool
             import ollama
 
-            await asyncio.get_event_loop().run_in_executor(
-                None, ollama.pull, model
-            )
+            await asyncio.get_event_loop().run_in_executor(None, ollama.pull, model)
 
             self.logger.info("model_pulled", model=model)
 
@@ -294,11 +292,11 @@ class LocalProvider(BaseLLMProvider):
                 f"Failed to pull model {model}: {e}",
                 provider="local",
                 original_error=e,
-            )
+            ) from e
 
     async def estimate_cost(
         self, prompt: str, completion_tokens: int = 500
-    ) -> dict[str, float]:
+    ) -> dict[str, float | str]:
         """Estimate the cost of a completion (always $0 for local).
 
         Args:
@@ -420,7 +418,7 @@ class HTTPLocalProvider(BaseLLMProvider):
                 f"HTTP API error: {e}",
                 provider="http_local",
                 original_error=e,
-            )
+            ) from e
 
     async def test_connection(self) -> bool:
         """Test the connection to HTTP API.

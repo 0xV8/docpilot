@@ -6,8 +6,6 @@ https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings
 
 from __future__ import annotations
 
-from typing import Optional
-
 from docpilot.core.models import CodeElement, ParameterInfo
 from docpilot.formatters.base import BaseFormatter
 
@@ -193,7 +191,7 @@ class GoogleFormatter(BaseFormatter):
 
         return "\n".join(lines)
 
-    def format_returns(self, return_type: Optional[str], description: str) -> str:
+    def format_returns(self, return_type: str | None, description: str) -> str:
         """Format the Returns section.
 
         Args:
@@ -298,7 +296,7 @@ class GoogleFormatter(BaseFormatter):
         exceptions: dict[str, str] = {}
         lines = raises_text.splitlines()
 
-        current_exc: Optional[str] = None
+        current_exc: str | None = None
         current_desc: list[str] = []
 
         for line in lines:

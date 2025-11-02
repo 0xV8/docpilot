@@ -8,9 +8,8 @@ their complete metadata.
 from __future__ import annotations
 
 import ast
-import inspect
+import tempfile
 from pathlib import Path
-from typing import Optional, Union
 
 import structlog
 
@@ -53,7 +52,7 @@ class PythonParser:
         self.extract_private = extract_private
         self._log = logger.bind(component="parser")
 
-    def parse_file(self, file_path: Union[str, Path]) -> ParseResult:
+    def parse_file(self, file_path: str | Path) -> ParseResult:
         """Parse a Python file and extract all code elements.
 
         Args:
@@ -88,7 +87,7 @@ class PythonParser:
             parse_errors: list[str] = []
 
             # Module-level docstring
-            module_docstring = ast.get_docstring(tree)
+            ast.get_docstring(tree)
 
             # Parse all module-level elements
             for node in ast.iter_child_nodes(tree):
@@ -114,21 +113,20 @@ class PythonParser:
                         if self.extract_private:
                             elements.extend(class_elements)
                         else:
-                            elements.extend(
-                                [e for e in class_elements if e.is_public]
-                            )
+                            elements.extend([e for e in class_elements if e.is_public])
 
                 except Exception as e:
                     error_msg = f"Error parsing {getattr(node, 'name', 'unknown')}: {e}"
                     parse_errors.append(error_msg)
-                    self._log.warning("parse_error", error=str(e), node=type(node).__name__)
+                    self._log.warning(
+                        "parse_error", error=str(e), node=type(node).__name__
+                    )
 
             # Calculate line counts
             lines = source_code.splitlines()
             total_lines = len(lines)
             code_lines = sum(
-                1 for line in lines
-                if line.strip() and not line.strip().startswith("#")
+                1 for line in lines if line.strip() and not line.strip().startswith("#")
             )
 
             return ParseResult(
@@ -148,6 +146,36 @@ class PythonParser:
         except Exception as e:
             self._log.error("parse_failed", path=str(file_path), error=str(e))
             raise
+
+    def parse_string(self, code: str) -> ParseResult:
+        """Parse Python source code from a string.
+
+        Args:
+            code: Python source code as a string
+
+        Returns:
+            ParseResult containing all extracted code elements
+
+        Raises:
+            SyntaxError: If code contains invalid Python syntax
+        """
+        # Create a temporary file to reuse parse_file logic
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".py",
+            encoding=self.encoding,
+            delete=False,
+        ) as temp_file:
+            temp_file.write(code)
+            temp_path = Path(temp_file.name)
+
+        try:
+            # Parse the temporary file
+            result = self.parse_file(temp_path)
+            return result
+        finally:
+            # Clean up the temporary file
+            temp_path.unlink(missing_ok=True)
 
     def _parse_class(
         self, node: ast.ClassDef, module_path: str, file_path: str
@@ -173,7 +201,7 @@ class PythonParser:
                 base_classes.append(ast.unparse(base))
 
         # Extract class attributes
-        attributes: list[tuple[str, Optional[str]]] = []
+        attributes: list[tuple[str, str | None]] = []
         for item in node.body:
             if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
                 attr_name = item.target.id
@@ -192,7 +220,24 @@ class PythonParser:
             dec.name in ("abstractmethod", "abc.ABCMeta") for dec in decorators
         )
 
-        # Create class element
+        # Parse methods and properties first
+        method_elements: list[CodeElement] = []
+        for item in node.body:
+            if isinstance(item, ast.FunctionDef):
+                method = self._parse_function(
+                    item, module_path, file_path, parent_class=node.name
+                )
+                if method:
+                    method_elements.append(method)
+
+            elif isinstance(item, ast.AsyncFunctionDef):
+                method = self._parse_function(
+                    item, module_path, file_path, parent_class=node.name, is_async=True
+                )
+                if method:
+                    method_elements.append(method)
+
+        # Create class element with methods
         class_element = CodeElement(
             name=node.name,
             element_type=CodeElementType.CLASS,
@@ -208,34 +253,24 @@ class PythonParser:
             attributes=attributes,
             decorators=decorators,
         )
+
+        # Populate the _methods field
+        class_element._methods = method_elements
+
         elements.append(class_element)
-
-        # Parse methods and properties
-        for item in node.body:
-            if isinstance(item, ast.FunctionDef):
-                method = self._parse_function(
-                    item, module_path, file_path, parent_class=node.name
-                )
-                if method:
-                    elements.append(method)
-
-            elif isinstance(item, ast.AsyncFunctionDef):
-                method = self._parse_function(
-                    item, module_path, file_path, parent_class=node.name, is_async=True
-                )
-                if method:
-                    elements.append(method)
+        # Methods are accessible via class_element.methods property
+        # Don't add them to the flat elements list to maintain clean separation
 
         return elements
 
     def _parse_function(
         self,
-        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
         module_path: str,
         file_path: str,
-        parent_class: Optional[str] = None,
+        parent_class: str | None = None,
         is_async: bool = False,
-    ) -> Optional[CodeElement]:
+    ) -> CodeElement | None:
         """Parse a function or method definition.
 
         Args:
@@ -333,7 +368,9 @@ class PythonParser:
 
         # *args
         if args.vararg:
-            type_hint = ast.unparse(args.vararg.annotation) if args.vararg.annotation else None
+            type_hint = (
+                ast.unparse(args.vararg.annotation) if args.vararg.annotation else None
+            )
             parameters.append(
                 ParameterInfo(
                     name=args.vararg.arg,
@@ -371,7 +408,9 @@ class PythonParser:
 
         # **kwargs
         if args.kwarg:
-            type_hint = ast.unparse(args.kwarg.annotation) if args.kwarg.annotation else None
+            type_hint = (
+                ast.unparse(args.kwarg.annotation) if args.kwarg.annotation else None
+            )
             parameters.append(
                 ParameterInfo(
                     name=args.kwarg.arg,
@@ -384,8 +423,8 @@ class PythonParser:
         return parameters
 
     def _parse_return(
-        self, node: Union[ast.FunctionDef, ast.AsyncFunctionDef], is_async: bool
-    ) -> Optional[ReturnInfo]:
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef, is_async: bool
+    ) -> ReturnInfo | None:
         """Parse return type information.
 
         Args:
@@ -401,8 +440,7 @@ class PythonParser:
 
         # Check if generator
         is_generator = any(
-            isinstance(n, (ast.Yield, ast.YieldFrom))
-            for n in ast.walk(node)
+            isinstance(n, (ast.Yield, ast.YieldFrom)) for n in ast.walk(node)
         )
 
         # Only create ReturnInfo if we have meaningful information
@@ -442,7 +480,7 @@ class PythonParser:
             return DecoratorInfo(name=ast.unparse(node))
 
     def _extract_exceptions(
-        self, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
     ) -> list[ExceptionInfo]:
         """Extract exceptions that can be raised by a function.
 
@@ -509,7 +547,7 @@ class PythonParser:
 
 
 def parse_file(
-    file_path: Union[str, Path],
+    file_path: str | Path,
     encoding: str = "utf-8",
     extract_private: bool = False,
 ) -> ParseResult:

@@ -4,7 +4,6 @@ __version__ = "0.1.0"
 __author__ = "docpilot contributors"
 __license__ = "MIT"
 
-from docpilot.core.parser import PythonParser
 from docpilot.core.analyzer import CodeAnalyzer
 from docpilot.core.generator import DocstringGenerator
 from docpilot.core.models import (
@@ -14,6 +13,7 @@ from docpilot.core.models import (
     GeneratedDocstring,
     ParseResult,
 )
+from docpilot.core.parser import PythonParser
 
 __all__ = [
     "__version__",

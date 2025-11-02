@@ -10,7 +10,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
@@ -90,9 +90,9 @@ class CodeAnalyzer:
             element: Code element to analyze (modified in place)
         """
         # Calculate complexity for functions/methods
-        if (
-            self.calculate_complexity
-            and element.element_type in (CodeElementType.FUNCTION, CodeElementType.METHOD)
+        if self.calculate_complexity and element.element_type in (
+            CodeElementType.FUNCTION,
+            CodeElementType.METHOD,
         ):
             element.complexity_score = self._calculate_complexity(element.source_code)
 
@@ -129,9 +129,9 @@ class CodeAnalyzer:
 
             for node in ast.walk(tree):
                 # Count decision points
-                if isinstance(node, (ast.If, ast.While, ast.For, ast.AsyncFor)):
-                    complexity += 1
-                elif isinstance(node, ast.ExceptHandler):
+                if isinstance(
+                    node, (ast.If, ast.While, ast.For, ast.AsyncFor, ast.ExceptHandler)
+                ):
                     complexity += 1
                 elif isinstance(node, ast.BoolOp):
                     # Each additional boolean operator adds complexity
@@ -163,36 +163,49 @@ class CodeAnalyzer:
                 if isinstance(node, ast.Compare):
                     # e.g., if x is None: -> x could be Optional
                     for comparator in node.comparators:
-                        if isinstance(comparator, ast.Constant) and comparator.value is None:
-                            if isinstance(node.left, ast.Name):
-                                type_hints[node.left.id] = "Optional"
+                        if (
+                            isinstance(comparator, ast.Constant)
+                            and comparator.value is None
+                        ) and isinstance(node.left, ast.Name):
+                            type_hints[node.left.id] = "Optional"
 
                 # Look for method calls to infer object types
-                elif isinstance(node, ast.Call):
-                    if isinstance(node.func, ast.Attribute):
-                        if isinstance(node.func.value, ast.Name):
-                            obj_name = node.func.value.id
-                            method_name = node.func.attr
+                elif isinstance(node, ast.Call) and (
+                    isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                ):
+                    obj_name = node.func.value.id
+                    method_name = node.func.attr
 
-                            # Common method patterns
-                            if method_name in ("append", "extend", "pop"):
-                                type_hints[obj_name] = "list"
-                            elif method_name in ("add", "remove", "discard"):
-                                type_hints[obj_name] = "set"
-                            elif method_name in ("keys", "values", "items", "get"):
-                                type_hints[obj_name] = "dict"
-                            elif method_name in ("strip", "split", "join", "lower", "upper"):
-                                type_hints[obj_name] = "str"
+                    # Common method patterns
+                    if method_name in ("append", "extend", "pop"):
+                        type_hints[obj_name] = "list"
+                    elif method_name in ("add", "remove", "discard"):
+                        type_hints[obj_name] = "set"
+                    elif method_name in ("keys", "values", "items", "get"):
+                        type_hints[obj_name] = "dict"
+                    elif method_name in (
+                        "strip",
+                        "split",
+                        "join",
+                        "lower",
+                        "upper",
+                    ):
+                        type_hints[obj_name] = "str"
 
             # Update parameters with inferred types (only if no type hint exists)
             for param in element.parameters:
                 if not param.type_hint and param.name in type_hints:
                     # Create a new ParameterInfo with updated type hint
                     # (Note: ParameterInfo is frozen, so we need to track this in metadata)
-                    element.metadata.setdefault("inferred_types", {})[param.name] = type_hints[param.name]
+                    element.metadata.setdefault("inferred_types", {})[param.name] = (
+                        type_hints[param.name]
+                    )
 
         except Exception as e:
-            self._log.warning("type_inference_failed", error=str(e), element=element.name)
+            self._log.warning(
+                "type_inference_failed", error=str(e), element=element.name
+            )
 
     def _detect_patterns(self, element: CodeElement) -> list[str]:
         """Detect common code patterns.
@@ -238,15 +251,24 @@ class CodeAnalyzer:
             # Detect patterns from source code
             if element.source_code:
                 # Singleton pattern
-                if "instance" in element.source_code and "__new__" in element.source_code:
+                if (
+                    "instance" in element.source_code
+                    and "__new__" in element.source_code
+                ):
                     patterns.append("singleton")
 
                 # Iterator pattern
-                if "__iter__" in element.source_code or "__next__" in element.source_code:
+                if (
+                    "__iter__" in element.source_code
+                    or "__next__" in element.source_code
+                ):
                     patterns.append("iterator")
 
                 # Context manager
-                if "__enter__" in element.source_code and "__exit__" in element.source_code:
+                if (
+                    "__enter__" in element.source_code
+                    and "__exit__" in element.source_code
+                ):
                     patterns.append("context_manager")
 
                 # Descriptor
@@ -254,7 +276,9 @@ class CodeAnalyzer:
                     patterns.append("descriptor")
 
         except Exception as e:
-            self._log.warning("pattern_detection_failed", error=str(e), element=element.name)
+            self._log.warning(
+                "pattern_detection_failed", error=str(e), element=element.name
+            )
 
         return patterns
 
@@ -290,8 +314,12 @@ class CodeAnalyzer:
 
         # Count methods by type
         if element.source_code:
-            metadata["method_count"] = len(re.findall(r"\n\s+def\s+", element.source_code))
-            metadata["property_count"] = len(re.findall(r"\n\s+@property", element.source_code))
+            metadata["method_count"] = len(
+                re.findall(r"\n\s+def\s+", element.source_code)
+            )
+            metadata["property_count"] = len(
+                re.findall(r"\n\s+@property", element.source_code)
+            )
             metadata["has_init"] = "__init__" in element.source_code
 
         element.metadata.update(metadata)
@@ -333,7 +361,9 @@ class CodeAnalyzer:
 
         # Analyze parameter characteristics
         if element.parameters:
-            param_count = len([p for p in element.parameters if p.name not in ("self", "cls")])
+            param_count = len(
+                [p for p in element.parameters if p.name not in ("self", "cls")]
+            )
             metadata["parameter_count"] = param_count
 
             # Count required vs optional
@@ -369,7 +399,9 @@ class CodeAnalyzer:
 
         for py_file in python_files:
             # Skip common directories
-            if any(part.startswith(".") or part == "__pycache__" for part in py_file.parts):
+            if any(
+                part.startswith(".") or part == "__pycache__" for part in py_file.parts
+            ):
                 continue
 
             try:

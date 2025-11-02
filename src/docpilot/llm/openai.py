@@ -6,25 +6,24 @@ This module implements LLM integration with OpenAI's GPT models
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Optional
+from typing import Any
 
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
 
 from docpilot.core.models import DocumentationContext
 from docpilot.llm.base import (
-    BaseLLMProvider,
-    LLMConfig,
-    LLMResponse,
-    LLMError,
-    RateLimitError,
     APIError,
     AuthenticationError,
+    BaseLLMProvider,
+    LLMConfig,
+    LLMError,
+    LLMResponse,
+    RateLimitError,
     TokenLimitError,
 )
 
@@ -52,7 +51,7 @@ class OpenAIProvider(BaseLLMProvider):
         super().__init__(config)
 
         try:
-            from openai import AsyncOpenAI
+            from openai import AsyncOpenAI  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
                 "OpenAI package not installed. "
@@ -196,16 +195,22 @@ class OpenAIProvider(BaseLLMProvider):
         try:
             from openai import (
                 APIError as OpenAIAPIError,
-                RateLimitError as OpenAIRateLimitError,
+            )
+            from openai import (
                 AuthenticationError as OpenAIAuthError,
+            )
+            from openai import (
                 BadRequestError,
+            )
+            from openai import (
+                RateLimitError as OpenAIRateLimitError,
             )
         except ImportError:
             raise LLMError(
                 f"OpenAI API error: {error}",
                 provider="openai",
                 original_error=error,
-            )
+            ) from None
 
         if isinstance(error, OpenAIRateLimitError):
             self.logger.warning("rate_limit_exceeded")
@@ -273,7 +278,7 @@ class OpenAIProvider(BaseLLMProvider):
 
     async def estimate_cost(
         self, prompt: str, completion_tokens: int = 500
-    ) -> dict[str, float]:
+    ) -> dict[str, float | str]:
         """Estimate the cost of a completion.
 
         Args:
