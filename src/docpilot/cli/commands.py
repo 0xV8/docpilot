@@ -82,7 +82,7 @@ def cli(
 @click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.option(
     "--style",
-    type=click.Choice(["google", "numpy", "sphinx", "auto"], case_sensitive=False),
+    type=click.Choice(["google", "numpy", "sphinx", "rest", "epytext", "auto"], case_sensitive=False),
     default="google",
     help="Docstring style",
 )
@@ -199,12 +199,18 @@ def generate(
 
     ui.display_file_list(files)
 
-    # Confirm if not dry run
-    if not dry_run and not ui.prompt_confirm(
+    # Confirm if not dry run and not interactive
+    if not dry_run and not interactive and not ui.prompt_confirm(
         f"Generate docstrings for {len(files)} file(s)?", default=True
     ):
         ui.print_info("Cancelled")
         sys.exit(0)
+
+    # Initialize interactive approver if needed
+    approver: InteractiveApprover | None = None
+    if interactive:
+        approver = InteractiveApprover(console=ui.console)
+        ui.print_info("Interactive mode enabled - you will review each docstring before writing")
 
     # Initialize generator
     try:
@@ -291,6 +297,32 @@ def generate(
                                         break
 
                         if element:
+                            # Interactive approval if enabled
+                            if approver:
+                                approval_result = approver.review_docstring(
+                                    element=element,
+                                    generated=doc,
+                                    file_path=file_path,
+                                )
+
+                                # Handle user decision
+                                if approval_result.action == ApprovalAction.QUIT:
+                                    logger.info("interactive_session_quit_by_user")
+                                    ui.print_warning("\nInteractive session stopped by user")
+                                    # Display stats so far
+                                    approver.display_final_stats()
+                                    sys.exit(0)
+                                elif approval_result.action == ApprovalAction.REJECT:
+                                    logger.info("docstring_rejected", element=doc.element_name)
+                                    total_skipped += 1
+                                    continue
+                                else:
+                                    # Accept or Edit - use the final docstring
+                                    final_docstring = approval_result.docstring
+                                    # Update doc with edited content if it was edited
+                                    if approval_result.action == ApprovalAction.EDIT:
+                                        doc = doc.model_copy(update={"docstring": final_docstring})
+
                             parent_class = element.parent_class
                             # Write to file
                             file_ops.insert_docstring(
@@ -305,7 +337,7 @@ def generate(
                             )
                             total_errors += 1
 
-                        if ctx.obj["verbose"]:
+                        if ctx.obj["verbose"] and not interactive:
                             ui.display_generation_result(doc, show_content=diff)
 
                     except Exception as e:
@@ -338,14 +370,19 @@ def generate(
     )
 
     # Display statistics
-    ui.display_statistics(
-        total_files=len(files),
-        total_elements=total_generated + total_skipped,
-        generated_count=total_generated,
-        skipped_count=total_skipped,
-        error_count=total_errors,
-        duration_seconds=duration,
-    )
+    if interactive and approver:
+        # Show interactive-specific statistics
+        approver.display_final_stats()
+    else:
+        # Show standard statistics
+        ui.display_statistics(
+            total_files=len(files),
+            total_elements=total_generated + total_skipped,
+            generated_count=total_generated,
+            skipped_count=total_skipped,
+            error_count=total_errors,
+            duration_seconds=duration,
+        )
 
     if dry_run:
         ui.print_info("Dry run completed. No files were modified.")
@@ -508,8 +545,52 @@ def version(ctx: click.Context) -> None:
         f"[bold cyan]docpilot[/bold cyan] version [green]{__version__}[/green]"
     )
     ui.console.print("\nA production-grade AI-powered docstring generator for Python")
-    ui.console.print("\nSupported styles: Google, NumPy, Sphinx")
+    ui.console.print("\nSupported styles: Google, NumPy, Sphinx, reStructuredText, Epytext")
     ui.console.print("Supported providers: OpenAI, Anthropic, Local (Ollama)")
+
+
+@cli.command()
+@click.pass_context
+def lsp(ctx: click.Context) -> None:
+    """Start docpilot as a Language Server Protocol (LSP) server.
+
+    This enables IDE integration for real-time docstring generation.
+    The server communicates via JSON-RPC over stdin/stdout.
+
+    Supported features:
+    - Code actions: Generate docstring for function/class
+    - Hover: Preview what docstring would be generated
+    - Completion: Docstring template suggestions
+
+    Example usage with VSCode:
+        Configure in settings.json:
+        {
+            "python.linting.enabled": true,
+            "docpilot.lsp.enabled": true
+        }
+
+    For other editors, consult the IDE integration documentation.
+    """
+    ui: DocpilotUI = ctx.obj["ui"]
+
+    if not ctx.obj.get("quiet"):
+        ui.print_info("Starting docpilot LSP server...")
+        ui.print_info("Server will communicate via stdin/stdout")
+        ui.print_info("Press Ctrl+C to stop")
+
+    try:
+        from docpilot.lsp.server import start_lsp_server
+
+        start_lsp_server()
+    except ImportError:
+        ui.print_error("LSP server components not available")
+        ui.print_info("This feature requires additional dependencies")
+        sys.exit(1)
+    except Exception as e:
+        ui.print_error(f"LSP server error: {e}")
+        if ctx.obj.get("verbose"):
+            logger.exception("lsp_server_error")
+        sys.exit(1)
 
 
 def main() -> None:

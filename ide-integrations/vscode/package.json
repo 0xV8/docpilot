@@ -1,0 +1,130 @@
+{
+  "name": "docpilot-vscode",
+  "displayName": "docpilot",
+  "description": "AI-powered docstring generator for Python",
+  "version": "0.2.0",
+  "publisher": "docpilot",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters"
+  ],
+  "keywords": [
+    "python",
+    "docstring",
+    "documentation",
+    "ai",
+    "code-generation"
+  ],
+  "activationEvents": [
+    "onLanguage:python"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "docpilot.generateDocstring",
+        "title": "docpilot: Generate Docstring for Current Function"
+      },
+      {
+        "command": "docpilot.generateAllDocstrings",
+        "title": "docpilot: Generate Docstrings for File"
+      },
+      {
+        "command": "docpilot.analyzeCode",
+        "title": "docpilot: Analyze Code Patterns"
+      }
+    ],
+    "configuration": {
+      "title": "docpilot",
+      "properties": {
+        "docpilot.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable docpilot extension"
+        },
+        "docpilot.style": {
+          "type": "string",
+          "default": "google",
+          "enum": [
+            "google",
+            "numpy",
+            "sphinx",
+            "rest",
+            "epytext"
+          ],
+          "description": "Docstring style to use"
+        },
+        "docpilot.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable LSP server for real-time features"
+        },
+        "docpilot.lsp.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to docpilot executable (leave empty for auto-detection)"
+        },
+        "docpilot.includePrivate": {
+          "type": "boolean",
+          "default": false,
+          "description": "Generate docstrings for private methods/functions"
+        },
+        "docpilot.overwrite": {
+          "type": "boolean",
+          "default": false,
+          "description": "Overwrite existing docstrings"
+        },
+        "docpilot.showPatterns": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show detected code patterns in docstrings"
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "docpilot.generateDocstring",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d",
+        "when": "editorTextFocus && editorLangId == python"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "docpilot.generateDocstring",
+          "when": "editorLangId == python",
+          "group": "1_modification"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^16.x",
+    "@types/vscode": "^1.70.0",
+    "typescript": "^4.7.4"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/docpilot"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/docpilot/issues"
+  },
+  "homepage": "https://github.com/yourusername/docpilot#readme",
+  "license": "MIT"
+}

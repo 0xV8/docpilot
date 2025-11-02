@@ -1,6 +1,6 @@
 """docpilot - AI-powered documentation autopilot for Python projects."""
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 __author__ = "docpilot contributors"
 __license__ = "MIT"
 

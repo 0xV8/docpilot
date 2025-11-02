@@ -89,6 +89,13 @@ class CodeAnalyzer:
         Args:
             element: Code element to analyze (modified in place)
         """
+        # Extract additional metadata based on element type FIRST
+        # This metadata is needed for pattern detection
+        if element.element_type == CodeElementType.CLASS:
+            self._analyze_class(element)
+        elif element.element_type in (CodeElementType.FUNCTION, CodeElementType.METHOD):
+            self._analyze_function(element)
+
         # Calculate complexity for functions/methods
         if self.calculate_complexity and element.element_type in (
             CodeElementType.FUNCTION,
@@ -103,8 +110,8 @@ class CodeAnalyzer:
         # Detect common patterns
         if self.detect_patterns:
             patterns = self._detect_patterns(element)
+            element.detected_patterns = patterns
             if patterns:
-                element.detected_patterns = patterns
                 element.metadata["patterns"] = patterns  # Maintain backward compatibility
 
                 # Calculate pattern confidence based on how many patterns detected
@@ -117,19 +124,14 @@ class CodeAnalyzer:
                 confidence_penalty = len(anti_patterns) * 0.15
                 element.pattern_confidence = max(0.0, base_confidence - confidence_penalty)
 
-                # Generate suggestions based on detected patterns
-                element.suggestions = self._generate_suggestions(element, patterns)
-
-        # Extract additional metadata based on element type
-        if element.element_type == CodeElementType.CLASS:
-            self._analyze_class(element)
-        elif element.element_type in (CodeElementType.FUNCTION, CodeElementType.METHOD):
-            self._analyze_function(element)
+            # Generate suggestions based on detected patterns (or lack thereof)
+            element.suggestions = self._generate_suggestions(element, patterns)
 
     def _calculate_complexity(self, source_code: str) -> int:
         """Calculate cyclomatic complexity of a function.
 
-        Uses a simplified McCabe complexity metric counting decision points.
+        Uses a simplified McCabe complexity metric counting decision points,
+        with additional penalty for deeply nested structures.
 
         Args:
             source_code: Source code of the function
@@ -140,6 +142,17 @@ class CodeAnalyzer:
         try:
             tree = ast.parse(source_code)
             complexity = 1  # Base complexity
+            max_nesting = 0
+
+            def calculate_nesting(node, current_depth=0):
+                nonlocal max_nesting
+                max_nesting = max(max_nesting, current_depth)
+
+                for child in ast.iter_child_nodes(node):
+                    if isinstance(child, (ast.If, ast.While, ast.For, ast.AsyncFor, ast.With)):
+                        calculate_nesting(child, current_depth + 1)
+                    else:
+                        calculate_nesting(child, current_depth)
 
             for node in ast.walk(tree):
                 # Count decision points
@@ -153,6 +166,13 @@ class CodeAnalyzer:
                 elif isinstance(node, (ast.ListComp, ast.DictComp, ast.SetComp)):
                     # Comprehensions with conditions
                     complexity += sum(1 for gen in node.generators for _ in gen.ifs)
+
+            # Calculate nesting depth
+            calculate_nesting(tree)
+
+            # Add nesting penalty (nesting depth > 3 adds to complexity)
+            if max_nesting > 3:
+                complexity += (max_nesting - 3)
 
             return complexity
 
@@ -363,8 +383,10 @@ class CodeAnalyzer:
                 # Magic numbers
                 if element.element_type in (CodeElementType.FUNCTION, CodeElementType.METHOD):
                     import re
-                    # Find numeric literals that aren't 0, 1, -1, or 2
-                    numbers = re.findall(r'\b(?<![\.\d])(?!0\b|1\b|2\b|-1\b)\d+(?![\.\d])\b', element.source_code)
+                    # Find numeric literals (integers and floats)
+                    numbers = re.findall(r'\b\d+\.?\d*\b', element.source_code)
+                    # Filter out common acceptable numbers (0, 1, 2, -1, etc)
+                    numbers = [n for n in numbers if n not in ('0', '1', '2', '10', '0.0', '1.0')]
                     if len(numbers) > 3:
                         patterns.append("anti_pattern_magic_numbers")
 

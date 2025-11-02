@@ -22,6 +22,7 @@ from docpilot.core.models import (
     ParseResult,
     ReturnInfo,
 )
+from docpilot.core.type_inference import TypeInferencer
 
 logger = structlog.get_logger(__name__)
 
@@ -41,16 +42,20 @@ class PythonParser:
         self,
         encoding: str = "utf-8",
         extract_private: bool = False,
+        infer_types: bool = True,
     ) -> None:
         """Initialize the parser.
 
         Args:
             encoding: File encoding to use when reading source files
             extract_private: Whether to include private/internal elements
+            infer_types: Whether to infer types when type hints are missing
         """
         self.encoding = encoding
         self.extract_private = extract_private
+        self.infer_types = infer_types
         self._log = logger.bind(component="parser")
+        self._type_inferencer = TypeInferencer() if infer_types else None
 
     def parse_file(self, file_path: str | Path) -> ParseResult:
         """Parse a Python file and extract all code elements.
@@ -283,10 +288,10 @@ class PythonParser:
         Returns:
             CodeElement representing the function/method
         """
-        # Extract parameters
-        parameters = self._parse_parameters(node.args)
+        # Extract parameters with type inference
+        parameters = self._parse_parameters(node.args, node.body)
 
-        # Extract return type
+        # Extract return type with type inference
         return_info = self._parse_return(node, is_async)
 
         # Extract decorators
@@ -332,11 +337,16 @@ class PythonParser:
             decorators=decorators,
         )
 
-    def _parse_parameters(self, args: ast.arguments) -> list[ParameterInfo]:
+    def _parse_parameters(
+        self,
+        args: ast.arguments,
+        func_body: list[ast.stmt] | None = None
+    ) -> list[ParameterInfo]:
         """Parse function parameters from arguments node.
 
         Args:
             args: AST arguments node
+            func_body: Function body for type inference
 
         Returns:
             List of ParameterInfo objects
@@ -347,15 +357,30 @@ class PythonParser:
         defaults_offset = len(args.args) - len(args.defaults)
         for i, arg in enumerate(args.args):
             default_value = None
+            default_expr = None
             is_required = True
 
             if i >= defaults_offset:
                 default_idx = i - defaults_offset
                 if default_idx < len(args.defaults):
-                    default_value = ast.unparse(args.defaults[default_idx])
+                    default_expr = args.defaults[default_idx]
+                    default_value = ast.unparse(default_expr)
                     is_required = False
 
             type_hint = ast.unparse(arg.annotation) if arg.annotation else None
+
+            # Infer type if missing and inference is enabled
+            inferred_type = None
+            inference_confidence = None
+            inference_source = None
+
+            if not type_hint and self._type_inferencer and func_body:
+                inferred = self._type_inferencer.infer_param_type(
+                    arg, default_expr, func_body
+                )
+                inferred_type = inferred.type_string
+                inference_confidence = inferred.confidence.value
+                inference_source = inferred.source
 
             parameters.append(
                 ParameterInfo(
@@ -363,6 +388,9 @@ class PythonParser:
                     type_hint=type_hint,
                     default_value=default_value,
                     is_required=is_required,
+                    inferred_type=inferred_type,
+                    type_inference_confidence=inference_confidence,
+                    type_inference_source=inference_source,
                 )
             )
 
@@ -389,13 +417,28 @@ class PythonParser:
 
         for kw_arg in args.kwonlyargs:
             default_value = None
+            default_expr = None
             is_required = True
 
             if kw_arg.arg in kw_defaults_map:
-                default_value = ast.unparse(kw_defaults_map[kw_arg.arg])
+                default_expr = kw_defaults_map[kw_arg.arg]
+                default_value = ast.unparse(default_expr)
                 is_required = False
 
             type_hint = ast.unparse(kw_arg.annotation) if kw_arg.annotation else None
+
+            # Infer type if missing
+            inferred_type = None
+            inference_confidence = None
+            inference_source = None
+
+            if not type_hint and self._type_inferencer and func_body:
+                inferred = self._type_inferencer.infer_param_type(
+                    kw_arg, default_expr, func_body
+                )
+                inferred_type = inferred.type_string
+                inference_confidence = inferred.confidence.value
+                inference_source = inferred.source
 
             parameters.append(
                 ParameterInfo(
@@ -403,6 +446,9 @@ class PythonParser:
                     type_hint=type_hint,
                     default_value=default_value,
                     is_required=is_required,
+                    inferred_type=inferred_type,
+                    type_inference_confidence=inference_confidence,
+                    type_inference_source=inference_source,
                 )
             )
 
@@ -443,12 +489,26 @@ class PythonParser:
             isinstance(n, (ast.Yield, ast.YieldFrom)) for n in ast.walk(node)
         )
 
+        # Infer return type if missing and inference is enabled
+        inferred_type = None
+        inference_confidence = None
+        inference_source = None
+
+        if not type_hint and self._type_inferencer:
+            inferred = self._type_inferencer.infer_return_type(node)
+            inferred_type = inferred.type_string
+            inference_confidence = inferred.confidence.value
+            inference_source = inferred.source
+
         # Only create ReturnInfo if we have meaningful information
-        if type_hint or is_generator or is_async:
+        if type_hint or is_generator or is_async or inferred_type:
             return ReturnInfo(
                 type_hint=type_hint,
                 is_generator=is_generator,
                 is_async=is_async,
+                inferred_type=inferred_type,
+                type_inference_confidence=inference_confidence,
+                type_inference_source=inference_source,
             )
 
         return None

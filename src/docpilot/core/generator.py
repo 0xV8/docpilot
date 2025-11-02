@@ -487,19 +487,22 @@ class MockLLMProvider:
     code element metadata, useful for testing and development.
     """
 
-    def _generate_description_from_name(self, name: str, element_type: str, parent_class: str | None = None) -> str:
-        """Generate a meaningful description based on element name.
+    def _generate_description_from_name(self, name: str, element_type: str, parent_class: str | None = None, patterns: list[str] | None = None) -> str:
+        """Generate a meaningful description based on element name and detected patterns.
 
         Args:
             name: Name of the code element
             element_type: Type of element (class, function, etc.)
             parent_class: Parent class name if this is a method
+            patterns: Detected design patterns
 
         Returns:
             Generated description string
         """
         # Convert snake_case or camelCase to words
         import re
+
+        patterns = patterns or []
 
         # Handle special methods first
         if name.startswith("__") and name.endswith("__"):
@@ -537,9 +540,21 @@ class MockLLMProvider:
         # Clean up and lowercase
         words = words.strip().lower()
 
-        # Common patterns for classes
+        # Pattern-based descriptions for classes
         if element_type == "class":
-            if "manager" in words:
+            if "singleton" in patterns:
+                return f"Singleton class for managing {words}"
+            elif "factory" in patterns:
+                return f"Factory class for creating {words.replace('factory', '').strip()} instances"
+            elif "adapter" in patterns:
+                return f"Adapter class for interfacing with {words.replace('adapter', '').strip()}"
+            elif "strategy" in patterns:
+                return f"Strategy class implementing {words.replace('strategy', '').strip()} algorithm"
+            elif "observer" in patterns:
+                return f"Observer class for monitoring {words.replace('observer', '').strip()} events"
+            elif "command" in patterns:
+                return f"Command class for executing {words.replace('command', '').strip()} operations"
+            elif "manager" in words:
                 return f"Manages {words.replace('manager', '').strip()} operations and state"
             elif "handler" in words:
                 return f"Handles {words.replace('handler', '').strip()} events and processing"
@@ -551,8 +566,6 @@ class MockLLMProvider:
                 return f"Client for interacting with {words.replace('client', '').strip()} services"
             elif "provider" in words:
                 return f"Provides {words.replace('provider', '').strip()} functionality"
-            elif "factory" in words:
-                return f"Factory for creating {words.replace('factory', '').strip()} instances"
             elif "builder" in words:
                 return f"Builder for constructing {words.replace('builder', '').strip()} objects"
             elif "validator" in words:
@@ -562,9 +575,21 @@ class MockLLMProvider:
             else:
                 return f"Represents a {words}"
 
-        # Common patterns for functions/methods
+        # Pattern-based descriptions for functions/methods
         elif element_type in ("function", "method"):
-            if words.startswith("get "):
+            if "factory_method" in patterns or "factory" in patterns:
+                return f"Factory method for creating {words.replace('create', '').replace('make', '').replace('build', '').strip()} instances"
+            elif "singleton" in patterns:
+                return f"Get singleton instance of {words}"
+            elif "crud_create" in patterns:
+                return f"Create a new {words.replace('create', '').strip()}"
+            elif "crud_read" in patterns:
+                return f"Retrieve {words.replace('get', '').replace('fetch', '').replace('retrieve', '').strip()} by ID or criteria"
+            elif "crud_update" in patterns:
+                return f"Update existing {words.replace('update', '').replace('set', '').strip()}"
+            elif "crud_delete" in patterns:
+                return f"Delete {words.replace('delete', '').replace('remove', '').strip()} from storage"
+            elif words.startswith("get "):
                 return f"Retrieves {words[4:]}"
             elif words.startswith("set "):
                 return f"Sets {words[4:]}"
@@ -679,6 +704,10 @@ class MockLLMProvider:
         Returns:
             True if example should be included, False otherwise
         """
+        # Include examples for complex functions (complexity_score > 5)
+        if element.complexity_score and element.complexity_score > 5:
+            return True
+
         # Include examples for functions/methods with parameters (excluding self/cls)
         has_params = any(p.name not in ("self", "cls") for p in element.parameters)
 
@@ -713,9 +742,6 @@ class MockLLMProvider:
 
         # Get parameters excluding self/cls
         params = [p for p in element.parameters if p.name not in ("self", "cls")]
-
-        if not params:
-            return lines
 
         # Build example call
         example_args = []
@@ -891,11 +917,12 @@ class MockLLMProvider:
         element = context.element
         lines: list[str] = []
 
-        # Generate meaningful summary based on element name and type
+        # Generate meaningful summary based on element name, type, and detected patterns
         summary = self._generate_description_from_name(
             element.name,
             element.element_type.value,
-            element.parent_class
+            element.parent_class,
+            element.detected_patterns
         )
 
         # Add async note if applicable
@@ -911,8 +938,18 @@ class MockLLMProvider:
                 lines.append("")
                 lines.append("Args:")
                 for param in params:
-                    param_type = param.type_hint or "Any"
-                    param_desc = self._generate_param_description(param.name, param.type_hint)
+                    # Use effective_type which prioritizes explicit type hint over inferred
+                    param_type = param.effective_type or "Any"
+                    param_desc = self._generate_param_description(param.name, param.effective_type)
+
+                    # Add type inference note if type was inferred
+                    if param.inferred_type and not param.type_hint:
+                        if param.type_inference_confidence == "high":
+                            param_desc += " (inferred)"
+                        elif param.type_inference_confidence == "medium":
+                            param_desc += " (likely)"
+                        elif param.type_inference_confidence == "low":
+                            param_desc += " (guessed)"
 
                     # Add optional note if has default
                     if param.default_value and param.default_value != "None":
@@ -923,12 +960,23 @@ class MockLLMProvider:
                     lines.append(f"    {param.name} ({param_type}): {param_desc}")
 
         # Returns
-        if element.return_info and element.return_info.type_hint:
-            return_type = element.return_info.type_hint
+        if element.return_info:
+            # Use effective_type which prioritizes explicit type hint over inferred
+            return_type = element.return_info.effective_type
             if return_type and return_type.lower() not in ("none", "nonetype"):
                 lines.append("")
                 lines.append("Returns:")
                 return_desc = self._generate_return_description(return_type, element.name)
+
+                # Add type inference note if type was inferred
+                if element.return_info.inferred_type and not element.return_info.type_hint:
+                    if element.return_info.type_inference_confidence == "high":
+                        return_desc += " (inferred)"
+                    elif element.return_info.type_inference_confidence == "medium":
+                        return_desc += " (likely)"
+                    elif element.return_info.type_inference_confidence == "low":
+                        return_desc += " (guessed)"
+
                 lines.append(f"    {return_type}: {return_desc}")
 
         # Raises
@@ -969,6 +1017,14 @@ class MockLLMProvider:
                 lines.append("Example:")
                 for example_line in example_lines:
                     lines.append(f"    {example_line}")
+
+        # Add note about detected design patterns (excluding anti-patterns)
+        design_patterns = [p for p in element.detected_patterns if not p.startswith("anti_pattern_")]
+        if design_patterns:
+            lines.append("")
+            pattern_names = ", ".join(p.replace("_", " ").title() for p in design_patterns)
+            lines.append(f"Note:")
+            lines.append(f"    This element implements: {pattern_names}")
 
         return "\n".join(lines)
 

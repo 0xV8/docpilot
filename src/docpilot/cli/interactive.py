@@ -481,18 +481,30 @@ class InteractiveApprover:
         # Find docstring boundaries
         in_docstring = False
         docstring_lines = []
+        quote_type = None
 
         for line in lines:
             if '"""' in line or "'''" in line:
                 if not in_docstring:
+                    # Starting docstring
                     in_docstring = True
-                    # Check if docstring starts on same line
-                    after_quotes = line.split('"""', 1)[-1] if '"""' in line else line.split("'''", 1)[-1]
-                    if after_quotes.strip() and '"""' not in after_quotes and "'''" not in after_quotes:
-                        docstring_lines.append(after_quotes)
+                    quote_type = '"""' if '"""' in line else "'''"
+
+                    # Check if it's a one-line docstring
+                    if line.count(quote_type) >= 2:
+                        # One-line docstring
+                        parts = line.split(quote_type)
+                        if len(parts) >= 3:
+                            docstring_lines.append(parts[1])
+                            break
+                    else:
+                        # Multi-line docstring - check if content starts on same line
+                        after_quotes = line.split(quote_type, 1)[-1]
+                        if after_quotes.strip():
+                            docstring_lines.append(after_quotes)
                 else:
                     # End of docstring
-                    before_quotes = line.split('"""', 1)[0] if '"""' in line else line.split("'''", 1)[0]
+                    before_quotes = line.split(quote_type, 1)[0]
                     if before_quotes.strip():
                         docstring_lines.append(before_quotes)
                     break

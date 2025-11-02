@@ -47,6 +47,9 @@ class ParameterInfo(BaseModel):
         is_variadic: Whether parameter is *args
         is_keyword: Whether parameter is **kwargs
         description: Human-readable description (extracted or generated)
+        inferred_type: Type inferred from usage when explicit hint missing
+        type_inference_confidence: Confidence level of type inference (high/medium/low)
+        type_inference_source: How the type was inferred
     """
 
     model_config = ConfigDict(frozen=True)
@@ -58,6 +61,9 @@ class ParameterInfo(BaseModel):
     is_variadic: bool = False
     is_keyword: bool = False
     description: str | None = None
+    inferred_type: str | None = None
+    type_inference_confidence: str | None = None
+    type_inference_source: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -66,6 +72,24 @@ class ParameterInfo(BaseModel):
         if not v or not v.strip():
             raise ValueError("Parameter name cannot be empty")
         return v.strip()
+
+    @property
+    def effective_type(self) -> str | None:
+        """Get the effective type (explicit hint or inferred type).
+
+        Returns:
+            Type hint if available, otherwise inferred type, or None
+        """
+        return self.type_hint or self.inferred_type
+
+    @property
+    def has_type_info(self) -> bool:
+        """Check if parameter has any type information.
+
+        Returns:
+            True if explicit type hint or inferred type exists
+        """
+        return self.type_hint is not None or self.inferred_type is not None
 
 
 class ReturnInfo(BaseModel):
@@ -76,6 +100,9 @@ class ReturnInfo(BaseModel):
         description: Human-readable description of return value
         is_generator: Whether function returns a generator
         is_async: Whether function is async (returns awaitable)
+        inferred_type: Type inferred from return statements when hint missing
+        type_inference_confidence: Confidence level of type inference (high/medium/low)
+        type_inference_source: How the type was inferred
     """
 
     model_config = ConfigDict(frozen=True)
@@ -84,6 +111,27 @@ class ReturnInfo(BaseModel):
     description: str | None = None
     is_generator: bool = False
     is_async: bool = False
+    inferred_type: str | None = None
+    type_inference_confidence: str | None = None
+    type_inference_source: str | None = None
+
+    @property
+    def effective_type(self) -> str | None:
+        """Get the effective type (explicit hint or inferred type).
+
+        Returns:
+            Type hint if available, otherwise inferred type, or None
+        """
+        return self.type_hint or self.inferred_type
+
+    @property
+    def has_type_info(self) -> bool:
+        """Check if return value has any type information.
+
+        Returns:
+            True if explicit type hint or inferred type exists
+        """
+        return self.type_hint is not None or self.inferred_type is not None
 
 
 class ExceptionInfo(BaseModel):
