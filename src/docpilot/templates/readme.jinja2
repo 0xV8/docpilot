@@ -1,0 +1,50 @@
+# {{ project_name }}
+
+{{ project_description }}
+
+## Installation
+
+```bash
+pip install {{ package_name }}
+```
+
+## Quick Start
+
+```python
+{{ quick_start_example }}
+```
+
+## Features
+
+{% for feature in features %}
+- **{{ feature.name }}**: {{ feature.description }}
+{% endfor %}
+
+## API Reference
+
+{% for module in modules %}
+### {{ module.name }}
+
+{{ module.description }}
+
+{% for element in module.elements %}
+#### `{{ element.signature }}`
+
+{{ element.docstring }}
+
+{% endfor %}
+{% endfor %}
+
+## Configuration
+
+```toml
+{{ config_example }}
+```
+
+## Contributing
+
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md).
+
+## License
+
+{{ license }}
