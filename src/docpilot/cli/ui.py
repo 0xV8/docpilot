@@ -104,7 +104,9 @@ class DocpilotUI:
             **kwargs: Additional style arguments
         """
         if not self.quiet:
-            self.console.print(f"[yellow]⚠[/yellow] {message}", **kwargs)
+            # Print icon with markup, then message without markup/highlight to preserve square brackets
+            self.console.print("[yellow]⚠[/yellow] ", end="")
+            self.console.print(message, markup=False, highlight=False, **kwargs)
 
     def print_error(self, message: str, **kwargs: Any) -> None:
         """Print an error message.
@@ -113,7 +115,10 @@ class DocpilotUI:
             message: Message to print
             **kwargs: Additional style arguments
         """
-        self.console.print(f"[red]✗[/red] {message}", **kwargs)
+        # Print icon with markup, then message without markup/highlight to preserve square brackets
+        # This ensures messages like "pip install docpilot[openai]" are displayed correctly
+        self.console.print("[red]✗[/red] ", end="")
+        self.console.print(message, markup=False, highlight=False, **kwargs)
 
     def print_debug(self, message: str, **kwargs: Any) -> None:
         """Print a debug message.

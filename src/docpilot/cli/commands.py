@@ -16,6 +16,7 @@ import click
 import structlog
 
 from docpilot import __version__
+from docpilot.cli.interactive import ApprovalAction, InteractiveApprover
 from docpilot.cli.ui import DocpilotUI, get_ui
 from docpilot.core.analyzer import CodeAnalyzer
 from docpilot.core.generator import DocstringGenerator
@@ -52,11 +53,19 @@ def cli(
     Generate comprehensive, formatted docstrings for your Python code
     using state-of-the-art LLMs.
     """
-    # Setup logging
-    log_level = logging.DEBUG if verbose else logging.INFO
+    # Setup logging based on verbose/quiet flags
+    if quiet:
+        log_level = logging.ERROR
+    elif verbose:
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.INFO
+
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
     )
+
+    logger.debug("logging_configured", level=logging.getLevelName(log_level))
 
     # Initialize UI
     ui = get_ui(verbose=verbose, quiet=quiet)
@@ -70,7 +79,7 @@ def cli(
 
 
 @cli.command()
-@click.argument("path", type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.option(
     "--style",
     type=click.Choice(["google", "numpy", "sphinx", "auto"], case_sensitive=False),
@@ -88,10 +97,11 @@ def cli(
 @click.option("--api-key", help="API key for LLM provider")
 @click.option("--dry-run", is_flag=True, help="Show changes without applying them")
 @click.option("--diff", is_flag=True, help="Show diffs of changes")
+@click.option("--interactive", "-i", is_flag=True, help="Review and approve each docstring before writing")
 @click.pass_context
 def generate(
     ctx: click.Context,
-    path: Path,
+    paths: tuple[Path, ...],
     style: str,
     overwrite: bool,
     include_private: bool,
@@ -100,48 +110,88 @@ def generate(
     api_key: str | None,
     dry_run: bool,
     diff: bool,
+    interactive: bool,
 ) -> None:
     """Generate docstrings for Python files.
 
-    PATH can be a file or directory. If a directory, all Python files
-    will be processed recursively.
+    PATHS can be one or more files or directories. If a directory is provided,
+    all Python files will be processed recursively. Supports shell glob patterns
+    like *.py or src/**/*.py (when expanded by the shell).
+
+    Examples:
+        docpilot generate file.py
+        docpilot generate file1.py file2.py file3.py
+        docpilot generate src/
+        docpilot generate *.py
     """
     ui: DocpilotUI = ctx.obj["ui"]
     config_path: Path | None = ctx.obj["config_path"]
 
+    # Validate flag combinations
+    if interactive and dry_run:
+        ui.print_error("Cannot use --interactive with --dry-run")
+        sys.exit(1)
+
     ui.print_banner()
 
+    # Build overrides dict - only include values that were explicitly provided via CLI
+    # Click's context stores which params were provided by the user
+    overrides = {}
+
+    # Always set style if provided (has a default value in Click)
+    if style:
+        overrides["style"] = DocstringStyle(style)
+
+    # For boolean flags, check if they were explicitly set by checking Click's default
+    # If the param was explicitly provided, it will be in ctx.params
+    if ctx.get_parameter_source("overwrite") == click.core.ParameterSource.COMMANDLINE:
+        overrides["overwrite"] = overwrite
+    if ctx.get_parameter_source("include_private") == click.core.ParameterSource.COMMANDLINE:
+        overrides["include_private"] = include_private
+
+    # For optional arguments, only include if not None
+    if provider:
+        overrides["llm_provider"] = LLMProvider(provider)
+    if model:
+        overrides["llm_model"] = model
+    if api_key:
+        overrides["llm_api_key"] = api_key
+
     # Load configuration
-    config = load_config(
-        config_path,
-        style=DocstringStyle(style),
-        overwrite=overwrite,
-        include_private=include_private,
-        llm_provider=LLMProvider(provider) if provider else None,
-        llm_model=model,
-        llm_api_key=api_key,
-    )
+    logger.debug("loading_configuration", config_path=str(config_path) if config_path else "default", overrides=list(overrides.keys()))
+    config = load_config(config_path, **overrides)
 
     # Get API key from environment if not provided
     if not config.llm_api_key:
+        logger.debug("fetching_api_key_from_env", provider=config.llm_provider.value)
         config.llm_api_key = get_api_key(config.llm_provider)
 
     if ctx.obj["verbose"]:
         ui.display_config(config.model_dump())
+        logger.debug("config_displayed")
 
-    # Find files
-    ui.print_info(f"Scanning [cyan]{path}[/cyan]...")
+    # Find files from all provided paths
+    ui.print_info(f"Scanning {len(paths)} path(s)...")
 
     file_ops = FileOperations(dry_run=dry_run)
+    files: list[Path] = []
 
-    if path.is_file():
-        files = [path]
-    else:
-        files = file_ops.find_python_files(
-            path,
-            config.file_pattern,
-            config.exclude_patterns,
-        )
+    for path in paths:
+        if path.is_file():
+            # Single file - add directly
+            if path not in files:  # Avoid duplicates
+                files.append(path)
+        else:
+            # Directory - find all Python files recursively
+            found_files = file_ops.find_python_files(
+                path,
+                config.file_pattern,
+                config.exclude_patterns,
+            )
+            # Add files, avoiding duplicates
+            for f in found_files:
+                if f not in files:
+                    files.append(f)
 
     if not files:
         ui.print_warning("No Python files found")
@@ -158,6 +208,7 @@ def generate(
 
     # Initialize generator
     try:
+        logger.info("initializing_generator", provider=config.llm_provider.value, model=config.llm_model)
         llm_config = config.to_llm_config()
         llm = create_provider(llm_config)
         generator = DocstringGenerator(llm_provider=llm)
@@ -165,12 +216,15 @@ def generate(
         ui.print_success(
             f"Initialized {config.llm_provider.value} provider with model {config.llm_model}"
         )
+        logger.info("generator_initialized_successfully")
 
     except Exception as e:
+        logger.error("generator_initialization_failed", error=str(e))
         ui.print_error(f"Failed to initialize LLM provider: {e}")
         sys.exit(1)
 
     # Process files
+    logger.info("starting_file_processing", total_files=len(files))
     start_time = time.time()
     total_generated = 0
     total_skipped = 0
@@ -182,8 +236,9 @@ def generate(
             total=len(files),
         )
 
-        for file_path in files:
+        for idx, file_path in enumerate(files, 1):
             try:
+                logger.debug("processing_file_started", file=str(file_path), progress=f"{idx}/{len(files)}")
                 progress.update(
                     task,
                     description=f"[cyan]Processing {file_path.name}...",
@@ -191,6 +246,7 @@ def generate(
 
                 # Parse file first to get element info
                 parse_result = generator.parser.parse_file(file_path)
+                logger.debug("file_parsed", file=str(file_path), elements_found=len(parse_result.elements))
 
                 # Generate docstrings
                 generated = asyncio.run(
@@ -203,11 +259,13 @@ def generate(
                 )
 
                 total_generated += len(generated)
+                logger.info("file_processed", file=str(file_path), docstrings_generated=len(generated))
 
                 # Write docstrings to file
                 for doc in generated:
                     try:
                         # Find element to get parent_class
+                        # First check top-level elements
                         element = next(
                             (
                                 e
@@ -216,6 +274,22 @@ def generate(
                             ),
                             None,
                         )
+
+                        # If not found, check methods within classes
+                        if element is None:
+                            for class_element in parse_result.elements:
+                                if hasattr(class_element, 'methods'):
+                                    element = next(
+                                        (
+                                            m
+                                            for m in class_element.methods
+                                            if m.name == doc.element_name
+                                        ),
+                                        None,
+                                    )
+                                    if element:
+                                        break
+
                         if element:
                             parent_class = element.parent_class
                             # Write to file
@@ -254,6 +328,15 @@ def generate(
 
     duration = time.time() - start_time
 
+    logger.info(
+        "processing_complete",
+        total_files=len(files),
+        total_generated=total_generated,
+        total_skipped=total_skipped,
+        total_errors=total_errors,
+        duration_seconds=round(duration, 2),
+    )
+
     # Display statistics
     ui.display_statistics(
         total_files=len(files),
@@ -266,6 +349,7 @@ def generate(
 
     if dry_run:
         ui.print_info("Dry run completed. No files were modified.")
+        logger.info("dry_run_completed")
 
     sys.exit(0 if total_errors == 0 else 1)
 
@@ -381,9 +465,11 @@ def test_connection(
 
     # Get API key from environment if not provided
     if not api_key:
+        logger.debug("fetching_api_key_for_test", provider=provider)
         api_key = get_api_key(LLMProvider(provider))
 
     try:
+        logger.info("testing_connection", provider=provider, model=model)
         from docpilot.llm.base import LLMConfig
 
         config = LLMConfig(
@@ -395,11 +481,14 @@ def test_connection(
         llm = create_provider(config)
 
         # Test connection
+        logger.debug("running_connection_test")
         result = asyncio.run(llm.test_connection())
 
         if result:
+            logger.info("connection_test_passed", provider=provider, model=model)
             ui.print_success(f"Successfully connected to {provider} with model {model}")
         else:
+            logger.error("connection_test_failed_no_result", provider=provider, model=model)
             ui.print_error("Connection test failed")
             sys.exit(1)
 
@@ -431,10 +520,28 @@ def main() -> None:
         ui = get_ui()
         ui.print_warning("\nInterrupted by user")
         sys.exit(130)
+    except SyntaxError as e:
+        ui = get_ui()
+        # Clean, user-friendly syntax error message
+        file_info = f" in {e.filename}" if e.filename else ""
+        line_info = f":{e.lineno}" if e.lineno else ""
+        ui.print_error(f"Syntax error{file_info}{line_info}")
+        if e.text and e.offset:
+            # Show the problematic line with pointer
+            ui.console.print(f"  {e.text.rstrip()}")
+            ui.console.print(f"  {' ' * (e.offset - 1)}^")
+        if e.msg:
+            ui.console.print(f"  {e.msg}")
+        # Only show full traceback in verbose mode
+        if "--verbose" in sys.argv or "-v" in sys.argv or "--debug" in sys.argv:
+            logger.exception("syntax_error")
+        sys.exit(1)
     except Exception as e:
         ui = get_ui()
         ui.print_error(f"Unexpected error: {e}")
-        logger.exception("cli_error")
+        # Only show full traceback in verbose mode
+        if "--verbose" in sys.argv or "-v" in sys.argv or "--debug" in sys.argv:
+            logger.exception("cli_error")
         sys.exit(1)
 
 

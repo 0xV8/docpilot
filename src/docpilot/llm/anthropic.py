@@ -55,7 +55,7 @@ class AnthropicProvider(BaseLLMProvider):
         except ImportError as e:
             raise ImportError(
                 "Anthropic package not installed. "
-                "Install with: pip install docpilot[llm]"
+                "Install with: pip install docpilot[anthropic]"
             ) from e
 
         if not config.api_key:

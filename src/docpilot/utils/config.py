@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import structlog
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,6 +22,8 @@ else:
 
 from docpilot.core.models import DocstringStyle
 from docpilot.llm.base import LLMProvider
+
+logger = structlog.get_logger(__name__)
 
 
 class DocpilotConfig(BaseSettings):
@@ -80,6 +83,21 @@ class DocpilotConfig(BaseSettings):
         description="Include private elements",
     )
 
+    @field_validator("style", mode="before")
+    @classmethod
+    def validate_style(cls, v: Any) -> DocstringStyle:
+        """Validate and convert docstring style (case-insensitive)."""
+        if isinstance(v, DocstringStyle):
+            return v
+        if isinstance(v, str):
+            # Convert to lowercase for case-insensitive matching
+            v_lower = v.lower()
+            for style in DocstringStyle:
+                if style.value == v_lower:
+                    return style
+            raise ValueError(f"Invalid docstring style: {v}")
+        return v
+
     # Analysis settings
     analyze_code: bool = Field(
         default=True,
@@ -135,6 +153,21 @@ class DocpilotConfig(BaseSettings):
         default="gpt-3.5-turbo",
         description="LLM model name",
     )
+
+    @field_validator("llm_provider", mode="before")
+    @classmethod
+    def validate_llm_provider(cls, v: Any) -> LLMProvider:
+        """Validate and convert LLM provider (case-insensitive)."""
+        if isinstance(v, LLMProvider):
+            return v
+        if isinstance(v, str):
+            # Convert to lowercase for case-insensitive matching
+            v_lower = v.lower()
+            for provider in LLMProvider:
+                if provider.value == v_lower:
+                    return provider
+            raise ValueError(f"Invalid LLM provider: {v}")
+        return v
     llm_api_key: str | None = Field(
         default=None,
         description="LLM API key",
@@ -247,20 +280,78 @@ def load_config(
     # Find config file if not specified
     if config_path is None:
         config_path = find_config_file()
+        if config_path:
+            logger.debug("config_file_found", path=str(config_path))
+        else:
+            logger.debug("no_config_file_found", message="Using defaults and environment variables")
 
     # Load from file if exists
     file_config: dict[str, Any] = {}
     if config_path and config_path.exists():
+        logger.info("loading_config", path=str(config_path))
         file_config = load_config_file(config_path)
+        logger.debug(
+            "config_loaded",
+            keys=list(file_config.keys()),
+            llm_provider=file_config.get("llm_provider"),
+            llm_model=file_config.get("llm_model"),
+        )
 
-    # Merge file config with overrides
-    merged_config = {**file_config, **overrides}
+    # Log CLI overrides
+    if overrides:
+        logger.debug(
+            "cli_overrides",
+            keys=list(overrides.keys()),
+            llm_provider=overrides.get("llm_provider"),
+            llm_model=overrides.get("llm_model"),
+        )
 
-    # Remove None values from overrides
-    merged_config = {k: v for k, v in merged_config.items() if v is not None}
+    # Remove None values from CLI overrides - they shouldn't override anything
+    filtered_overrides = {k: v for k, v in overrides.items() if v is not None}
 
-    # Create config instance
-    return DocpilotConfig(**merged_config)
+    # Build config with proper precedence: CLI > env > file > defaults
+    # We need to carefully merge config sources while respecting precedence
+
+    # Step 1: Start with file config as base
+    base_config = file_config.copy() if file_config else {}
+
+    # Step 2: Override file config with values from environment
+    # We do this by checking which env vars are set and removing those keys from base_config
+    # so that BaseSettings will read them from environment instead
+    if file_config:
+        for key in list(base_config.keys()):
+            env_var = f"DOCPILOT_{key.upper()}"
+            if env_var in os.environ:
+                # Env var exists, remove from base config so env takes precedence
+                del base_config[key]
+
+    # Step 3: Apply CLI overrides (they should override both file and env)
+    final_config = {**base_config, **filtered_overrides}
+
+    if filtered_overrides:
+        logger.debug(
+            "applying_cli_overrides",
+            keys=list(filtered_overrides.keys()),
+            llm_provider=filtered_overrides.get("llm_provider"),
+            llm_model=filtered_overrides.get("llm_model"),
+        )
+
+    # Create config instance with merged values
+    # The values we pass here will override environment variables
+    config = DocpilotConfig(**final_config)
+
+    # Log final configuration settings
+    logger.info(
+        "config_initialized",
+        provider=config.llm_provider.value,
+        model=config.llm_model,
+        style=config.style.value,
+        overwrite=config.overwrite,
+        include_private=config.include_private,
+        analyze_code=config.analyze_code,
+    )
+
+    return config
 
 
 def find_config_file() -> Path | None:
@@ -282,6 +373,8 @@ def find_config_file() -> Path | None:
         Path.home() / ".config" / "docpilot" / "config.toml",
     ]
 
+    logger.debug("searching_config_files", paths=[str(p) for p in search_paths])
+
     for path in search_paths:
         if path.exists():
             # For pyproject.toml, check if it has docpilot section
@@ -290,10 +383,13 @@ def find_config_file() -> Path | None:
                     with open(path, "rb") as f:
                         data = tomllib.load(f)
                     if "tool" in data and "docpilot" in data["tool"]:
+                        logger.debug("config_found_in_pyproject", path=str(path))
                         return path
-                except Exception:
+                except Exception as e:
+                    logger.debug("pyproject_read_failed", path=str(path), error=str(e))
                     continue
             else:
+                logger.debug("config_found", path=str(path))
                 return path
 
     return None
@@ -313,21 +409,26 @@ def load_config_file(config_path: Path) -> dict[str, Any]:
         ValueError: If file is invalid TOML
     """
     if not config_path.exists():
+        logger.error("config_file_not_found", path=str(config_path))
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
     try:
+        logger.debug("reading_config_file", path=str(config_path))
         with open(config_path, "rb") as f:
             data = tomllib.load(f)
 
         # Extract docpilot section
         if config_path.name == "pyproject.toml":
             config: dict[str, Any] = data.get("tool", {}).get("docpilot", {})
+            logger.debug("config_extracted_from_pyproject", settings_count=len(config))
         else:
             config = data.get("docpilot", data)
+            logger.debug("config_extracted", settings_count=len(config))
 
         return config
 
     except Exception as e:
+        logger.error("config_parse_failed", path=str(config_path), error=str(e))
         raise ValueError(f"Invalid config file {config_path}: {e}") from e
 
 
@@ -341,8 +442,10 @@ def create_default_config(output_path: Path) -> None:
         FileExistsError: If file already exists
     """
     if output_path.exists():
+        logger.error("config_already_exists", path=str(output_path))
         raise FileExistsError(f"Config file already exists: {output_path}")
 
+    logger.info("creating_default_config", path=str(output_path))
     default_config = """# docpilot configuration
 
 [docpilot]
@@ -395,6 +498,7 @@ log_format = "console"
 """
 
     output_path.write_text(default_config)
+    logger.info("default_config_created", path=str(output_path))
 
 
 def get_api_key(provider: LLMProvider) -> str | None:
@@ -413,9 +517,15 @@ def get_api_key(provider: LLMProvider) -> str | None:
         LLMProvider.MOCK: [],  # No API key needed
     }
 
+    logger.debug("checking_api_key", provider=provider.value)
+
     for env_var in env_vars.get(provider, []):
         api_key = os.getenv(env_var)
         if api_key:
+            logger.debug("api_key_found", env_var=env_var, provider=provider.value)
             return api_key
+
+    if env_vars.get(provider):
+        logger.debug("api_key_not_found", provider=provider.value, checked_vars=env_vars.get(provider, []))
 
     return None

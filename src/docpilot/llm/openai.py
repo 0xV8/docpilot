@@ -55,7 +55,7 @@ class OpenAIProvider(BaseLLMProvider):
         except ImportError as e:
             raise ImportError(
                 "OpenAI package not installed. "
-                "Install with: pip install docpilot[llm]"
+                "Install with: pip install docpilot[openai]"
             ) from e
 
         if not config.api_key:

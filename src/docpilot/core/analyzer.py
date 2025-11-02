@@ -104,7 +104,21 @@ class CodeAnalyzer:
         if self.detect_patterns:
             patterns = self._detect_patterns(element)
             if patterns:
-                element.metadata["patterns"] = patterns
+                element.detected_patterns = patterns
+                element.metadata["patterns"] = patterns  # Maintain backward compatibility
+
+                # Calculate pattern confidence based on how many patterns detected
+                # and whether they're anti-patterns
+                anti_patterns = [p for p in patterns if p.startswith("anti_pattern_")]
+                design_patterns = [p for p in patterns if not p.startswith("anti_pattern_")]
+
+                # Higher confidence with more design patterns, lower with anti-patterns
+                base_confidence = min(0.9, 0.5 + (len(design_patterns) * 0.1))
+                confidence_penalty = len(anti_patterns) * 0.15
+                element.pattern_confidence = max(0.0, base_confidence - confidence_penalty)
+
+                # Generate suggestions based on detected patterns
+                element.suggestions = self._generate_suggestions(element, patterns)
 
         # Extract additional metadata based on element type
         if element.element_type == CodeElementType.CLASS:
@@ -208,7 +222,7 @@ class CodeAnalyzer:
             )
 
     def _detect_patterns(self, element: CodeElement) -> list[str]:
-        """Detect common code patterns.
+        """Detect common code patterns, design patterns, and anti-patterns.
 
         Args:
             element: Code element to analyze
@@ -234,46 +248,125 @@ class CodeAnalyzer:
             if "contextmanager" in decorator_names:
                 patterns.append("context_manager")
 
+            if "abstractmethod" in decorator_names or "abc.abstractmethod" in decorator_names:
+                patterns.append("abstract_method")
+
+            if "staticmethod" in decorator_names:
+                patterns.append("static_method")
+
+            if "classmethod" in decorator_names:
+                patterns.append("class_method")
+
             # Detect patterns from naming conventions
             name_lower = element.name.lower()
 
-            if name_lower.startswith("get_"):
-                patterns.append("getter")
-            elif name_lower.startswith("set_"):
-                patterns.append("setter")
-            elif name_lower.startswith("is_") or name_lower.startswith("has_"):
-                patterns.append("predicate")
-            elif name_lower.startswith("create_") or name_lower.startswith("make_"):
-                patterns.append("factory")
-            elif name_lower.startswith("build_"):
-                patterns.append("builder")
+            # CRUD patterns
+            if name_lower.startswith("get_") or name_lower.startswith("fetch_") or name_lower.startswith("retrieve_"):
+                patterns.append("crud_read")
+            elif name_lower.startswith("set_") or name_lower.startswith("update_"):
+                patterns.append("crud_update")
+            elif name_lower.startswith("create_") or name_lower.startswith("add_"):
+                patterns.append("crud_create")
+            elif name_lower.startswith("delete_") or name_lower.startswith("remove_"):
+                patterns.append("crud_delete")
 
-            # Detect patterns from source code
+            # Common patterns
+            if name_lower.startswith("is_") or name_lower.startswith("has_") or name_lower.startswith("can_"):
+                patterns.append("predicate")
+            elif name_lower.startswith("make_"):
+                patterns.append("factory_method")
+            elif name_lower.startswith("build_"):
+                patterns.append("builder_method")
+            elif name_lower.startswith("validate_"):
+                patterns.append("validation")
+            elif name_lower.startswith("serialize_") or name_lower.startswith("deserialize_"):
+                patterns.append("serialization")
+            elif name_lower.startswith("parse_"):
+                patterns.append("parser")
+            elif name_lower.startswith("format_"):
+                patterns.append("formatter")
+
+            # Detect design patterns from source code
             if element.source_code:
+                source_lower = element.source_code.lower()
+
+                # Design Patterns
                 # Singleton pattern
-                if (
-                    "instance" in element.source_code
-                    and "__new__" in element.source_code
-                ):
+                if "__new__" in element.source_code and "instance" in source_lower:
                     patterns.append("singleton")
 
+                # Factory pattern
+                if element.element_type == CodeElementType.CLASS:
+                    if any(word in name_lower for word in ["factory", "creator"]):
+                        patterns.append("factory")
+                elif element.element_type in (CodeElementType.FUNCTION, CodeElementType.METHOD):
+                    if "return " in source_lower and element.name.startswith(("create_", "make_", "build_")):
+                        patterns.append("factory_method")
+
+                # Strategy pattern
+                if element.element_type == CodeElementType.CLASS and any(word in name_lower for word in ["strategy", "algorithm"]):
+                    patterns.append("strategy")
+
+                # Observer pattern
+                if any(word in source_lower for word in ["subscribe", "notify", "observer", "listener"]):
+                    patterns.append("observer")
+
+                # Decorator pattern (not Python decorators, but GoF decorator)
+                if element.element_type == CodeElementType.CLASS and "wrapper" in name_lower:
+                    patterns.append("decorator_pattern")
+
+                # Adapter pattern
+                if element.element_type == CodeElementType.CLASS and "adapter" in name_lower:
+                    patterns.append("adapter")
+
                 # Iterator pattern
-                if (
-                    "__iter__" in element.source_code
-                    or "__next__" in element.source_code
-                ):
+                if "__iter__" in element.source_code or "__next__" in element.source_code:
                     patterns.append("iterator")
 
                 # Context manager
-                if (
-                    "__enter__" in element.source_code
-                    and "__exit__" in element.source_code
-                ):
+                if "__enter__" in element.source_code and "__exit__" in element.source_code:
                     patterns.append("context_manager")
 
                 # Descriptor
                 if "__get__" in element.source_code or "__set__" in element.source_code:
                     patterns.append("descriptor")
+
+                # Template method pattern
+                if element.element_type == CodeElementType.CLASS and "raise NotImplementedError" in element.source_code:
+                    patterns.append("template_method")
+
+                # Command pattern
+                if element.element_type == CodeElementType.CLASS and "execute" in source_lower:
+                    patterns.append("command")
+
+                # Anti-patterns detection
+                # God class - too many methods
+                if element.element_type == CodeElementType.CLASS:
+                    method_count = element.metadata.get("method_count", 0)
+                    if method_count > 20:
+                        patterns.append("anti_pattern_god_class")
+
+                # Long method - high complexity or many lines
+                if element.element_type in (CodeElementType.FUNCTION, CodeElementType.METHOD):
+                    lines = element.source_code.split('\n')
+                    if len(lines) > 100:
+                        patterns.append("anti_pattern_long_method")
+
+                    if element.complexity_score and element.complexity_score > 15:
+                        patterns.append("anti_pattern_high_complexity")
+
+                # Too many parameters
+                param_count = len([p for p in element.parameters if p.name not in ("self", "cls")])
+                if param_count > 5:
+                    patterns.append("anti_pattern_too_many_parameters")
+
+                # Magic numbers
+                if element.element_type in (CodeElementType.FUNCTION, CodeElementType.METHOD):
+                    import re
+                    # Find numeric literals that aren't 0, 1, -1, or 2
+                    numbers = re.findall(r'\b(?<![\.\d])(?!0\b|1\b|2\b|-1\b)\d+(?![\.\d])\b', element.source_code)
+                    if len(numbers) > 3:
+                        patterns.append("anti_pattern_magic_numbers")
 
         except Exception as e:
             self._log.warning(
@@ -281,6 +374,94 @@ class CodeAnalyzer:
             )
 
         return patterns
+
+    def _generate_suggestions(self, element: CodeElement, patterns: list[str]) -> list[str]:
+        """Generate improvement suggestions based on detected patterns.
+
+        Args:
+            element: Code element being analyzed
+            patterns: List of detected patterns
+
+        Returns:
+            List of suggestions for improvement
+        """
+        suggestions: list[str] = []
+
+        # Suggestions for anti-patterns
+        if "anti_pattern_god_class" in patterns:
+            suggestions.append(
+                "Consider breaking this class into smaller, more focused classes following the Single Responsibility Principle"
+            )
+
+        if "anti_pattern_long_method" in patterns:
+            suggestions.append(
+                "Consider refactoring this method into smaller, more focused functions"
+            )
+
+        if "anti_pattern_high_complexity" in patterns:
+            suggestions.append(
+                f"High cyclomatic complexity ({element.complexity_score}). Consider simplifying logic or extracting methods"
+            )
+
+        if "anti_pattern_too_many_parameters" in patterns:
+            param_count = len([p for p in element.parameters if p.name not in ("self", "cls")])
+            suggestions.append(
+                f"This function has {param_count} parameters. Consider using a configuration object or builder pattern"
+            )
+
+        if "anti_pattern_magic_numbers" in patterns:
+            suggestions.append(
+                "Consider extracting magic numbers into named constants for better readability"
+            )
+
+        # Suggestions for design pattern opportunities
+        if "factory_method" in patterns and element.element_type in (CodeElementType.FUNCTION, CodeElementType.METHOD):
+            suggestions.append(
+                "Factory method detected. Ensure proper error handling and consider adding type hints for return value"
+            )
+
+        if "singleton" in patterns:
+            suggestions.append(
+                "Singleton pattern detected. Consider thread-safety if used in concurrent environments"
+            )
+
+        # Suggestions for missing patterns
+        if element.element_type in (CodeElementType.FUNCTION, CodeElementType.METHOD):
+            # Check if parameters lack type hints
+            untyped_params = [p for p in element.parameters if not p.type_hint and p.name not in ("self", "cls")]
+            if untyped_params and len(untyped_params) > 2:
+                suggestions.append(
+                    "Add type hints to parameters for better code clarity and IDE support"
+                )
+
+            # Check if missing return type
+            if element.return_info and not element.return_info.type_hint:
+                suggestions.append(
+                    "Add return type hint for better code documentation"
+                )
+
+        # Suggestions for CRUD operations
+        crud_patterns = ["crud_create", "crud_read", "crud_update", "crud_delete"]
+        detected_crud = [p for p in patterns if p in crud_patterns]
+        if detected_crud:
+            if "crud_read" in patterns:
+                suggestions.append(
+                    "CRUD read operation detected. Document expected return values and handle missing data cases"
+                )
+            if "crud_create" in patterns:
+                suggestions.append(
+                    "CRUD create operation detected. Ensure proper validation and document error cases"
+                )
+            if "crud_update" in patterns:
+                suggestions.append(
+                    "CRUD update operation detected. Consider idempotency and partial update handling"
+                )
+            if "crud_delete" in patterns:
+                suggestions.append(
+                    "CRUD delete operation detected. Document cascading behavior and handle non-existent resources"
+                )
+
+        return suggestions
 
     def _analyze_class(self, element: CodeElement) -> None:
         """Perform class-specific analysis.

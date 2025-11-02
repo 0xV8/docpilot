@@ -56,7 +56,7 @@ class LocalProvider(BaseLLMProvider):
         except ImportError as e:
             raise ImportError(
                 "Ollama package not installed. "
-                "Install with: pip install docpilot[local]"
+                "Install with: pip install docpilot[ollama]"
             ) from e
 
         self.logger.info(
@@ -347,7 +347,7 @@ class HTTPLocalProvider(BaseLLMProvider):
         except ImportError as e:
             raise ImportError(
                 "httpx package not installed. "
-                "Install with: pip install docpilot[llm]"
+                "Install with: pip install docpilot[openai] or pip install docpilot[anthropic]"
             ) from e
 
         if not config.base_url:

@@ -31,6 +31,8 @@ class DocstringStyle(str, Enum):
     GOOGLE = "google"
     NUMPY = "numpy"
     SPHINX = "sphinx"
+    REST = "rest"  # reStructuredText style
+    EPYTEXT = "epytext"  # Epytext style
     AUTO = "auto"  # Auto-detect from existing code
 
 
@@ -169,9 +171,9 @@ class CodeElement(BaseModel):
     end_lineno: int | None = None
     source_code: str
     docstring: str | None = None
-    file_path: str
+    file_path: str = ""
     parent_class: str | None = None
-    module_path: str
+    module_path: str = ""
 
     # Visibility and modifiers
     is_public: bool = True
@@ -194,6 +196,9 @@ class CodeElement(BaseModel):
 
     # Analysis metadata
     complexity_score: int | None = None
+    detected_patterns: list[str] = Field(default_factory=list)
+    pattern_confidence: float = Field(ge=0.0, le=1.0, default=0.0)
+    suggestions: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("name")
@@ -228,8 +233,13 @@ class CodeElement(BaseModel):
 
     @property
     def has_docstring(self) -> bool:
-        """Check if element has an existing docstring."""
-        return bool(self.docstring and self.docstring.strip())
+        """Check if element has an existing docstring.
+
+        Returns True if a docstring exists (even if empty or whitespace-only).
+        This is because an empty docstring like '""""""' indicates the presence
+        of a docstring, just with no content.
+        """
+        return self.docstring is not None
 
     @property
     def return_type(self) -> str | None:

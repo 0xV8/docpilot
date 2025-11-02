@@ -340,23 +340,36 @@ def create_provider(config: LLMConfig) -> BaseLLMProvider:
     """
     from docpilot.core.generator import MockLLMProvider
 
+    logger.info(
+        "creating_llm_provider",
+        provider=config.provider.value,
+        model=config.model,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+    )
+
     if config.provider == LLMProvider.MOCK:
+        logger.debug("initializing_mock_provider")
         return MockLLMProvider()  # type: ignore
 
     elif config.provider == LLMProvider.OPENAI:
         from docpilot.llm.openai import OpenAIProvider
 
+        logger.debug("initializing_openai_provider", model=config.model)
         return OpenAIProvider(config)
 
     elif config.provider == LLMProvider.ANTHROPIC:
         from docpilot.llm.anthropic import AnthropicProvider
 
+        logger.debug("initializing_anthropic_provider", model=config.model)
         return AnthropicProvider(config)
 
     elif config.provider == LLMProvider.LOCAL:
         from docpilot.llm.local import LocalProvider
 
+        logger.debug("initializing_local_provider", model=config.model, base_url=config.base_url)
         return LocalProvider(config)
 
     else:
+        logger.error("unsupported_provider", provider=config.provider)
         raise ValueError(f"Unsupported provider: {config.provider}")

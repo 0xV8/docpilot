@@ -249,17 +249,19 @@ class FileOperations:
                             and item.name == element_name
                         ):
                             return item
+            return None
         else:
             # Find top-level function or class
-            for node in ast.walk(tree):
-                if (
-                    isinstance(
-                        node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-                    )
-                    and node.name == element_name
-                    and not parent_class
-                ):
-                    return node
+            # Use ast.Module body to avoid nested elements
+            if isinstance(tree, ast.Module):
+                for node in tree.body:
+                    if (
+                        isinstance(
+                            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                        )
+                        and node.name == element_name
+                    ):
+                        return node
 
         return None
 
